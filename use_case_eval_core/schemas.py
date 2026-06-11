@@ -6,6 +6,7 @@ JUDGE_QUESTIONS_OUTPUT = "generated_judge_questions.csv"
 JUDGE_1_RESULTS_OUTPUT = "judge_1_results.csv"
 MODEL_RETURNS_OUTPUT = ".\\generated_model_returns.csv"
 JUDGE_SCORES_OUTPUT = ".\\generated_judge_scores.csv"
+FINAL_RESULTS_OUTPUT = ".\\final_results.csv"
 
 GENERATED_QUESTIONS_COLUMNS = [
     "test_id",

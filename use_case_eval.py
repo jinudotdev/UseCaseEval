@@ -4,9 +4,11 @@ import sys
 from use_case_eval_core.csv_utils import (
     parse_generated_tests,
     read_judge_questions,
+    read_judge_scores,
     read_judge_tests,
     read_model_returns,
     read_tests,
+    write_final_results,
     write_generated_tests,
     write_judge_1_results,
     write_judge_questions,
@@ -14,6 +16,7 @@ from use_case_eval_core.csv_utils import (
     write_model_returns,
     write_results,
 )
+from use_case_eval_core.final_results_generation import build_final_result_rows
 from use_case_eval_core.judge_question_generation import build_judge_question_rows
 from use_case_eval_core.judge_scores_generation import run_judge_1_batch, run_judge_scores
 from use_case_eval_core.model_returns_generation import run_eval, run_model_returns
@@ -24,6 +27,7 @@ from use_case_eval_core.question_generation import (
     prompt_for_use_case,
 )
 from use_case_eval_core.schemas import (
+    FINAL_RESULTS_OUTPUT,
     GENERATED_QUESTIONS_OUTPUT,
     JUDGE_1_RESULTS_OUTPUT,
     JUDGE_QUESTIONS_OUTPUT,
@@ -114,6 +118,11 @@ def parse_args():
         help=f"Judge scores output CSV path. Default: {JUDGE_SCORES_OUTPUT}.",
     )
     parser.add_argument(
+        "--judge-scores-input",
+        default=JUDGE_SCORES_OUTPUT,
+        help=f"Judge scores input CSV path. Default: {JUDGE_SCORES_OUTPUT}.",
+    )
+    parser.add_argument(
         "--judge-model",
         help="Ollama model to use for standalone generated judge scoring.",
     )
@@ -127,6 +136,16 @@ def parse_args():
         "--debug-judge-scores",
         action="store_true",
         help="Print Ollama generated judge score request and response diagnostics.",
+    )
+    parser.add_argument(
+        "--generate-final-results",
+        action="store_true",
+        help="Merge generated_model_returns.csv and generated_judge_scores.csv into final_results.csv.",
+    )
+    parser.add_argument(
+        "--final-results-output",
+        default=FINAL_RESULTS_OUTPUT,
+        help=f"Final results output CSV path. Default: {FINAL_RESULTS_OUTPUT}.",
     )
     parser.add_argument(
         "--judge-1-model",
@@ -183,6 +202,19 @@ def parse_args():
 def main():
     args = parse_args()
     judge_1_model = args.judge_1_model.strip() if args.judge_1_model else None
+
+    if args.generate_final_results:
+        try:
+            model_returns = read_model_returns(args.model_returns_input)
+            judge_scores = read_judge_scores(args.judge_scores_input)
+            final_result_rows = build_final_result_rows(model_returns, judge_scores)
+            write_final_results(args.final_results_output, final_result_rows)
+        except (OSError, ValueError) as error:
+            print(f"Error generating final results: {error}", file=sys.stderr)
+            return 1
+
+        print(f"Wrote {len(final_result_rows)} final result rows to {args.final_results_output}")
+        return 0
 
     if requests is None:
         print(

@@ -38,6 +38,10 @@ def write_results(output_path, rows):
     write_csv(output_path, FINAL_RESULTS_COLUMNS, rows)
 
 
+def write_final_results(output_path, rows):
+    write_results(output_path, rows)
+
+
 def write_model_returns(output_path, rows):
     write_csv(output_path, MODEL_RETURNS_COLUMNS, rows)
 
@@ -68,6 +72,16 @@ def read_judge_questions(input_path):
 
 def write_judge_scores(output_path, rows):
     write_csv(output_path, JUDGE_SCORES_COLUMNS, rows)
+
+
+def read_judge_scores(input_path):
+    with open(input_path, newline="", encoding="utf-8") as csv_file:
+        reader = csv.DictReader(csv_file)
+        missing_columns = set(JUDGE_SCORES_COLUMNS) - set(reader.fieldnames or [])
+        if missing_columns:
+            missing = ", ".join(sorted(missing_columns))
+            raise ValueError(f"Judge scores CSV is missing required column(s): {missing}")
+        return list(reader)
 
 
 def read_judge_tests(input_path):
