@@ -3,16 +3,19 @@ import sys
 
 from use_case_eval_core.csv_utils import (
     parse_generated_tests,
+    read_judge_questions,
     read_judge_tests,
+    read_model_returns,
     read_tests,
     write_generated_tests,
     write_judge_1_results,
     write_judge_questions,
+    write_judge_scores,
     write_model_returns,
     write_results,
 )
 from use_case_eval_core.judge_question_generation import build_judge_question_rows
-from use_case_eval_core.judge_runner import run_judge_1_batch
+from use_case_eval_core.judge_runner import run_judge_1_batch, run_judge_scores
 from use_case_eval_core.model_runner import run_eval, run_model_returns
 from use_case_eval_core.ollama_client import requests
 from use_case_eval_core.question_generation import (
@@ -24,6 +27,7 @@ from use_case_eval_core.schemas import (
     GENERATED_QUESTIONS_OUTPUT,
     JUDGE_1_RESULTS_OUTPUT,
     JUDGE_QUESTIONS_OUTPUT,
+    JUDGE_SCORES_OUTPUT,
     JUDGE_TESTS_OUTPUT,
     MODEL_RETURNS_OUTPUT,
 )
@@ -88,6 +92,41 @@ def parse_args():
         "--model-returns-output",
         default=MODEL_RETURNS_OUTPUT,
         help=f"Model returns output CSV path. Default: {MODEL_RETURNS_OUTPUT}.",
+    )
+    parser.add_argument(
+        "--generate-judge-scores",
+        action="store_true",
+        help="Score generated_model_returns.csv using generated_judge_questions.csv.",
+    )
+    parser.add_argument(
+        "--judge-questions-input",
+        default=".\\generated_judge_questions.csv",
+        help="Judge questions input CSV path. Default: .\\generated_judge_questions.csv.",
+    )
+    parser.add_argument(
+        "--model-returns-input",
+        default=MODEL_RETURNS_OUTPUT,
+        help=f"Model returns input CSV path. Default: {MODEL_RETURNS_OUTPUT}.",
+    )
+    parser.add_argument(
+        "--judge-scores-output",
+        default=JUDGE_SCORES_OUTPUT,
+        help=f"Judge scores output CSV path. Default: {JUDGE_SCORES_OUTPUT}.",
+    )
+    parser.add_argument(
+        "--judge-model",
+        help="Ollama model to use for standalone generated judge scoring.",
+    )
+    parser.add_argument(
+        "--judge-pass-threshold",
+        type=int,
+        default=4,
+        help="Minimum generated judge score required to pass. Default: 4.",
+    )
+    parser.add_argument(
+        "--debug-judge-scores",
+        action="store_true",
+        help="Print Ollama generated judge score request and response diagnostics.",
     )
     parser.add_argument(
         "--judge-1-model",
@@ -171,6 +210,28 @@ def main():
             return 1
 
         print(f"Wrote {len(judge_1_rows)} Judge 1 rows to {args.judge_1_output}")
+        return 0
+
+    if args.generate_judge_scores:
+        if not args.judge_model:
+            print("Error: --judge-model is required with --generate-judge-scores.", file=sys.stderr)
+            return 1
+        try:
+            judge_questions = read_judge_questions(args.judge_questions_input)
+            model_returns = read_model_returns(args.model_returns_input)
+            judge_score_rows = run_judge_scores(
+                judge_questions,
+                model_returns,
+                args.judge_model,
+                args.judge_pass_threshold,
+                args.debug_judge_scores,
+            )
+            write_judge_scores(args.judge_scores_output, judge_score_rows)
+        except (OSError, ValueError) as error:
+            print(f"Error generating judge scores: {error}", file=sys.stderr)
+            return 1
+
+        print(f"Wrote {len(judge_score_rows)} judge score rows to {args.judge_scores_output}")
         return 0
 
     if args.export_judge_questions:

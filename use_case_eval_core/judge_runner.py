@@ -212,3 +212,215 @@ def run_judge_1_batch(judge_tasks, judge_1_model, threshold, debug_judge_1=False
         )
         rows.append(build_judge_1_result_row(judge_task, judge_1_result))
     return rows
+
+
+def build_judge_score_prompt(judge_question, model_return):
+    return (
+        f"{judge_question.get('judge_role', '')}\n\n"
+        "Use case:\n"
+        f"{model_return.get('use_case', '')}\n\n"
+        "User question:\n"
+        f"{model_return.get('input', '')}\n\n"
+        "Model being evaluated:\n"
+        f"{model_return.get('model_name', '')}\n\n"
+        "Model response:\n"
+        f"{model_return.get('model_response', '')}\n\n"
+        "Expected behavior:\n"
+        f"{judge_question.get('expected_behavior', '')}\n\n"
+        "Judge standard:\n"
+        f"{judge_question.get('judge_standard', '')}\n\n"
+        "Judge rubric:\n"
+        f"{judge_question.get('judge_rubric', '')}\n\n"
+        "Output format:\n"
+        f"{judge_question.get('judge_output_format', '')}\n\n"
+        "Score the model response according to the rubric.\n"
+        "Return only valid JSON."
+    )
+
+
+def extract_judge_score_text(response_json):
+    raw_judge_text = extract_judge_text(response_json)
+    if raw_judge_text:
+        return raw_judge_text
+
+    message = response_json.get("message") if isinstance(response_json, dict) else None
+    thinking = message.get("thinking") if isinstance(message, dict) else None
+    if thinking:
+        return str(thinking)
+
+    return ""
+
+
+def judge_score_problem(message):
+    return {
+        "judge_score": "",
+        "judge_reason": message or "judge parse error",
+        "judge_pass_fail": "fail",
+    }
+
+
+def normalize_judge_score_1_to_5(score):
+    normalized_score = normalize_judge_score(score)
+    if not 1 <= normalized_score <= 5:
+        raise ValueError("Score must be an integer from 1 to 5.")
+    return normalized_score
+
+
+def parse_judge_score_result(raw_judge_text, threshold):
+    cleaned = strip_markdown_fences(raw_judge_text).strip()
+    parsed, parse_error = extract_first_json_object(cleaned)
+
+    if parsed is None:
+        return judge_score_problem(parse_error)
+
+    try:
+        score = normalize_judge_score_1_to_5(parsed.get("score"))
+    except (TypeError, ValueError) as error:
+        return judge_score_problem(str(error))
+
+    reasoning = parsed.get("reasoning")
+    if not isinstance(reasoning, str) or not reasoning.strip():
+        reasoning = parsed.get("reason")
+    if not isinstance(reasoning, str) or not reasoning.strip():
+        return judge_score_problem("Judge response is missing a non-empty reasoning.")
+
+    pass_fail = "pass" if score >= threshold else "fail"
+    return {
+        "judge_score": str(score),
+        "judge_reason": reasoning.strip(),
+        "judge_pass_fail": pass_fail,
+    }
+
+
+def run_judge_score(
+    judge_model,
+    threshold,
+    judge_question,
+    model_return,
+    debug_judge_scores=False,
+):
+    payload = {
+        "model": judge_model,
+        "messages": [
+            {
+                "role": "user",
+                "content": build_judge_score_prompt(judge_question, model_return),
+            }
+        ],
+        "stream": False,
+        "think": False,
+        "options": {
+            "think": False,
+            "temperature": 0.0,
+            "top_p": 0.9,
+            "num_predict": 700,
+            "num_ctx": 4096,
+        },
+    }
+
+    try:
+        if debug_judge_scores:
+            print(f"Judge score test_id: {model_return.get('test_id', '')}", file=sys.stderr)
+            print(
+                f"Judge score model_name: {model_return.get('model_name', '')}",
+                file=sys.stderr,
+            )
+            print(f"Judge score judge_model: {judge_model}", file=sys.stderr)
+            print(f"Judge score request URL: {OLLAMA_CHAT_URL}", file=sys.stderr)
+            print("Judge score request JSON:", file=sys.stderr)
+            print(json.dumps(payload, indent=2), file=sys.stderr)
+
+        response = post_chat(payload, timeout=300)
+
+        if debug_judge_scores:
+            print(f"Judge score HTTP status code: {response.status_code}", file=sys.stderr)
+            print("Judge score raw response text:", file=sys.stderr)
+            print(response.text, file=sys.stderr)
+
+        response.raise_for_status()
+        try:
+            response_json = response.json()
+        except ValueError as error:
+            error_message = f"Ollama response was not valid JSON: {error}"
+            if debug_judge_scores:
+                print("Extracted judge score text repr:", file=sys.stderr)
+                print(repr(""), file=sys.stderr)
+                print(f"Judge score parse error: {error_message}", file=sys.stderr)
+            return judge_score_problem(error_message)
+
+        if debug_judge_scores:
+            print("Judge score parsed response JSON:", file=sys.stderr)
+            print(json.dumps(response_json, indent=2), file=sys.stderr)
+
+        raw_judge_text = extract_judge_score_text(response_json)
+
+        if debug_judge_scores:
+            print("Extracted judge score text repr:", file=sys.stderr)
+            print(repr(raw_judge_text), file=sys.stderr)
+
+        judge_result = parse_judge_score_result(raw_judge_text, threshold)
+        if debug_judge_scores and not judge_result["judge_score"]:
+            print(f"Judge score parse error: {judge_result['judge_reason']}", file=sys.stderr)
+        return judge_result
+    except requests.exceptions.RequestException as error:
+        error_message = f"judge request error: {error}"
+        if debug_judge_scores:
+            print(f"Judge score parse error: {error_message}", file=sys.stderr)
+        return judge_score_problem(error_message)
+    except ValueError as error:
+        error_message = str(error)
+        if debug_judge_scores:
+            print(f"Judge score parse error: {error_message}", file=sys.stderr)
+        return judge_score_problem(error_message)
+
+
+def build_judge_score_row(model_return, judge_model, judge_result):
+    return {
+        "test_id": model_return["test_id"],
+        "use_case": model_return["use_case"],
+        "input": model_return["input"],
+        "model_name": model_return["model_name"],
+        "judge_model": judge_model,
+        "judge_score": judge_result["judge_score"],
+        "judge_reason": judge_result["judge_reason"],
+        "judge_pass_fail": judge_result["judge_pass_fail"],
+    }
+
+
+def run_judge_scores(
+    judge_questions,
+    model_returns,
+    judge_model,
+    threshold,
+    debug_judge_scores=False,
+):
+    judge_questions_by_test_id = {
+        judge_question["test_id"]: judge_question for judge_question in judge_questions
+    }
+    rows = []
+
+    for model_return in model_returns:
+        test_id = model_return["test_id"]
+        model_name = model_return["model_name"]
+        print(f"Scoring model return: {test_id} / {model_name}")
+
+        judge_question = judge_questions_by_test_id.get(test_id)
+        if judge_question is None:
+            judge_result = judge_score_problem("missing judge question for test_id")
+        else:
+            judge_result = run_judge_score(
+                judge_model,
+                threshold,
+                judge_question,
+                model_return,
+                debug_judge_scores,
+            )
+
+        print(
+            f"[{judge_model}] [{test_id}] [{model_name}] "
+            f"score={judge_result['judge_score']} "
+            f"pass_fail={judge_result['judge_pass_fail']}"
+        )
+        rows.append(build_judge_score_row(model_return, judge_model, judge_result))
+
+    return rows
