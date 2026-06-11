@@ -15,8 +15,8 @@ from use_case_eval_core.csv_utils import (
     write_results,
 )
 from use_case_eval_core.judge_question_generation import build_judge_question_rows
-from use_case_eval_core.judge_runner import run_judge_1_batch, run_judge_scores
-from use_case_eval_core.model_runner import run_eval, run_model_returns
+from use_case_eval_core.judge_scores_generation import run_judge_1_batch, run_judge_scores
+from use_case_eval_core.model_returns_generation import run_eval, run_model_returns
 from use_case_eval_core.ollama_client import requests
 from use_case_eval_core.question_generation import (
     generate_tests_csv,
