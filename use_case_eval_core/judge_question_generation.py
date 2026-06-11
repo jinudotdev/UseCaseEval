@@ -7,21 +7,26 @@ from .schemas import OLLAMA_CHAT_URL
 
 
 GENERIC_JUDGE_RUBRIC = (
-    "Score 1 [Critical Failure]: The model completely fails to understand the intent, "
-    "hallucinates actions, or refuses a valid task.\n"
-    "Score 2 [Poor / Incomplete]: The model recognizes the general intent but misses "
-    "critical parameters such as time, date, target, or action, or gives a highly "
-    "confusing response.\n"
-    "Score 3 [Acceptable / Basic]: The model captures the task and key parameters "
-    "correctly, but the tone is robotic, overly verbose, or treats the request as a "
-    "text chatbot response rather than a voice interface action.\n"
-    "Score 4 [Good / Professional]: The model successfully processes the task, "
-    "confirms the action clearly with all important parameters, and adopts an "
-    "appropriate assistant persona. It may have minor structural bloat.\n"
-    "Score 5 [Excellent]: The model provides an excellent, professional response. It "
-    "addresses the request directly, captures the important details, and remains "
-    "concise and appropriate for the use case."
+    "Score 1 [Critical Failure]: The response is unsafe, irrelevant, hallucinated, "
+    "or completely fails the request.\n"
+    "Score 2 [Poor / Incomplete]: The response recognizes the general topic but "
+    "misses important requirements, contains confusing advice, or omits key "
+    "safety/context details.\n"
+    "Score 3 [Acceptable / Basic]: The response is mostly relevant and safe but "
+    "incomplete, too vague, too verbose, or only partly useful.\n"
+    "Score 4 [Good / Professional]: The response is accurate, safe, useful, and "
+    "appropriate for the use case with only minor issues.\n"
+    "Score 5 [Excellent]: The response is concise, accurate, highly useful, "
+    "safety-aware, and well suited to the stated use case and question."
 )
+
+RUBRIC_SCORE_MARKERS = [
+    "Score 1",
+    "Score 2",
+    "Score 3",
+    "Score 4",
+    "Score 5",
+]
 
 JUDGE_OUTPUT_FORMAT_PREFIX = (
     "To ensure scoring accuracy, think step-by-step internally before scoring. Then "
@@ -140,10 +145,48 @@ def build_dynamic_judge_question_prompt(use_case, test_id, input_text):
         "}\n\n"
         "Rules:\n\n"
         "* expected_behavior must start with \"The assistant should...\"\n"
-        "* judge_rubric must be a 1-5 scoring rubric specific to this use case and question.\n"
+        "* judge_rubric must list scores in ascending order from Score 1 to Score 5 using this exact structure:\n"
+        "Score 1 [Critical Failure]: ...\n"
+        "Score 2 [Poor / Incomplete]: ...\n"
+        "Score 3 [Acceptable / Basic]: ...\n"
+        "Score 4 [Good / Professional]: ...\n"
+        "Score 5 [Excellent]: ...\n"
         "* Penalize hallucinations, unsafe advice, fake certainty, irrelevant output, and pretending to use tools not provided.\n"
         "* Reward accurate, safe, concise, useful responses."
     )
+
+
+def build_rubric_correction_prompt(use_case, input_text, bad_rubric):
+    return (
+        f"Use case: {use_case}\n"
+        f"Test question: {input_text}\n\n"
+        "Rewrite only this judge_rubric so it uses the required ascending Score 1 to Score 5 format.\n\n"
+        "Bad rubric:\n"
+        f"{bad_rubric}\n\n"
+        "Required structure:\n"
+        "Score 1 [Critical Failure]: ...\n"
+        "Score 2 [Poor / Incomplete]: ...\n"
+        "Score 3 [Acceptable / Basic]: ...\n"
+        "Score 4 [Good / Professional]: ...\n"
+        "Score 5 [Excellent]: ...\n\n"
+        "Return strict JSON only:\n"
+        "{\n"
+        "\"judge_rubric\": \"...\"\n"
+        "}"
+    )
+
+
+def is_ordered_judge_rubric(judge_rubric):
+    if not isinstance(judge_rubric, str):
+        return False
+
+    last_index = -1
+    for marker in RUBRIC_SCORE_MARKERS:
+        marker_index = judge_rubric.find(marker)
+        if marker_index == -1 or marker_index <= last_index:
+            return False
+        last_index = marker_index
+    return True
 
 
 def extract_dynamic_judge_question_text(response_json):
@@ -191,35 +234,8 @@ def normalize_generated_judge_fields(parsed_json):
     return normalized
 
 
-def generate_judge_question_fields(
-    generator_model,
-    use_case,
-    test_id,
-    input_text,
-    debug_generator=False,
-):
-    payload = {
-        "model": generator_model,
-        "think": False,
-        "messages": [
-            {
-                "role": "user",
-                "content": build_dynamic_judge_question_prompt(use_case, test_id, input_text),
-            }
-        ],
-        "stream": False,
-        "options": {
-            "think": False,
-            "temperature": 0.2,
-            "top_p": 0.9,
-            "num_predict": 700,
-            "num_ctx": 4096,
-        },
-    }
-
+def request_judge_question_json(generator_model, payload, debug_generator=False):
     if debug_generator:
-        print(f"Judge-question generator test_id: {test_id}", file=sys.stderr)
-        print(f"Judge-question generator model: {generator_model}", file=sys.stderr)
         print(f"Judge-question generator request URL: {OLLAMA_CHAT_URL}", file=sys.stderr)
         print("Judge-question generator request JSON:", file=sys.stderr)
         print(json.dumps(payload, indent=2), file=sys.stderr)
@@ -248,12 +264,92 @@ def generate_judge_question_fields(
         print(repr(raw_text), file=sys.stderr)
 
     try:
-        parsed_json = parse_dynamic_judge_question_json(raw_text)
-        fields = normalize_generated_judge_fields(parsed_json)
+        return parse_dynamic_judge_question_json(raw_text)
     except ValueError as error:
         if debug_generator:
             print(f"Judge-question generator parse error: {error}", file=sys.stderr)
         raise
+
+
+def build_judge_question_payload(generator_model, prompt):
+    return {
+        "model": generator_model,
+        "think": False,
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        ],
+        "stream": False,
+        "options": {
+            "think": False,
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "num_predict": 700,
+            "num_ctx": 4096,
+        },
+    }
+
+
+def correct_judge_rubric(
+    generator_model,
+    use_case,
+    input_text,
+    bad_rubric,
+    debug_generator=False,
+):
+    payload = build_judge_question_payload(
+        generator_model,
+        build_rubric_correction_prompt(use_case, input_text, bad_rubric),
+    )
+    parsed_json = request_judge_question_json(generator_model, payload, debug_generator)
+    corrected_rubric = parsed_json.get("judge_rubric")
+    if not isinstance(corrected_rubric, str) or not corrected_rubric.strip():
+        raise ValueError("Generated judge rubric correction is missing judge_rubric.")
+    corrected_rubric = corrected_rubric.strip()
+    if not is_ordered_judge_rubric(corrected_rubric):
+        raise ValueError("Generated judge rubric correction is not ordered.")
+    return corrected_rubric
+
+
+def generate_judge_question_fields(
+    generator_model,
+    use_case,
+    test_id,
+    input_text,
+    debug_generator=False,
+):
+    payload = build_judge_question_payload(
+        generator_model,
+        build_dynamic_judge_question_prompt(use_case, test_id, input_text),
+    )
+
+    if debug_generator:
+        print(f"Judge-question generator test_id: {test_id}", file=sys.stderr)
+        print(f"Judge-question generator model: {generator_model}", file=sys.stderr)
+
+    parsed_json = request_judge_question_json(generator_model, payload, debug_generator)
+    fields = normalize_generated_judge_fields(parsed_json)
+    judge_rubric = fields["judge_rubric"]
+    if not is_ordered_judge_rubric(judge_rubric):
+        if debug_generator:
+            print(
+                f"Judge rubric validation failed for {test_id}; attempting correction.",
+                file=sys.stderr,
+            )
+        try:
+            judge_rubric = correct_judge_rubric(
+                generator_model,
+                use_case,
+                input_text,
+                judge_rubric,
+                debug_generator,
+            )
+        except ValueError:
+            if debug_generator:
+                print(f"Using fallback ordered rubric for {test_id}", file=sys.stderr)
+            judge_rubric = build_judge_rubric(use_case)
 
     return {
         "test_id": test_id,
@@ -261,7 +357,7 @@ def generate_judge_question_fields(
         "expected_behavior": fields["expected_behavior"],
         "judge_role": build_judge_role(use_case),
         "judge_standard": build_judge_standard(use_case),
-        "judge_rubric": fields["judge_rubric"],
+        "judge_rubric": judge_rubric,
         "judge_output_format": build_judge_output_format(use_case),
     }
 
@@ -287,6 +383,7 @@ def build_judge_question_rows(tests, use_case, generator_model=None, debug_gener
                         f"Using fallback judge-question template for {test['test_id']}",
                         file=sys.stderr,
                     )
+                    print(f"Using fallback ordered rubric for {test['test_id']}", file=sys.stderr)
         judge_rows.append(build_judge_question_fields(use_case, test["test_id"], test["input"]))
     return judge_rows
 
