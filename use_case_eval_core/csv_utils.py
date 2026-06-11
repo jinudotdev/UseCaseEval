@@ -8,6 +8,7 @@ from .schemas import (
     JUDGE_1_RESULT_COLUMNS,
     JUDGE_QUESTION_COLUMNS,
     JUDGE_TEST_COLUMNS,
+    MODEL_RETURNS_COLUMNS,
 )
 
 
@@ -34,6 +35,10 @@ def write_generated_tests(output_path, tests):
 
 def write_results(output_path, rows):
     write_csv(output_path, FINAL_RESULTS_COLUMNS, rows)
+
+
+def write_model_returns(output_path, rows):
+    write_csv(output_path, MODEL_RETURNS_COLUMNS, rows)
 
 
 def write_judge_questions(output_path, rows):

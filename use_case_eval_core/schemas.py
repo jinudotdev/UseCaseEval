@@ -4,6 +4,7 @@ GENERATED_QUESTIONS_OUTPUT = "generated_questions.csv"
 JUDGE_TESTS_OUTPUT = "generated_judge_tests.csv"
 JUDGE_QUESTIONS_OUTPUT = "generated_judge_questions.csv"
 JUDGE_1_RESULTS_OUTPUT = "judge_1_results.csv"
+MODEL_RETURNS_OUTPUT = ".\\generated_model_returns.csv"
 
 GENERATED_QUESTIONS_COLUMNS = [
     "test_id",
@@ -31,6 +32,16 @@ MODEL_RESULT_COLUMNS = [
 ]
 
 FINAL_RESULTS_COLUMNS = MODEL_RESULT_COLUMNS
+
+MODEL_RETURNS_COLUMNS = [
+    "test_id",
+    "use_case",
+    "input",
+    "model_name",
+    "model_response",
+    "latency_ms",
+    "tokens_per_second",
+]
 
 JUDGE_TEST_COLUMNS = [
     "judge_test_id",

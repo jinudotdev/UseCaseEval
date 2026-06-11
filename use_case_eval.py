@@ -8,11 +8,12 @@ from use_case_eval_core.csv_utils import (
     write_generated_tests,
     write_judge_1_results,
     write_judge_questions,
+    write_model_returns,
     write_results,
 )
 from use_case_eval_core.judge_question_generation import build_judge_question_rows
 from use_case_eval_core.judge_runner import run_judge_1_batch
-from use_case_eval_core.model_runner import run_eval
+from use_case_eval_core.model_runner import run_eval, run_model_returns
 from use_case_eval_core.ollama_client import requests
 from use_case_eval_core.question_generation import (
     generate_tests_csv,
@@ -24,6 +25,7 @@ from use_case_eval_core.schemas import (
     JUDGE_1_RESULTS_OUTPUT,
     JUDGE_QUESTIONS_OUTPUT,
     JUDGE_TESTS_OUTPUT,
+    MODEL_RETURNS_OUTPUT,
 )
 
 
@@ -76,6 +78,16 @@ def parse_args():
         "--debug-generator",
         action="store_true",
         help="Print Ollama generator request and response diagnostics.",
+    )
+    parser.add_argument(
+        "--generate-model-returns",
+        action="store_true",
+        help="Run tested models and write raw generated_model_returns.csv responses.",
+    )
+    parser.add_argument(
+        "--model-returns-output",
+        default=MODEL_RETURNS_OUTPUT,
+        help=f"Model returns output CSV path. Default: {MODEL_RETURNS_OUTPUT}.",
     )
     parser.add_argument(
         "--judge-1-model",
@@ -185,6 +197,38 @@ def main():
         return 0
 
     model_names = [model.strip() for model in (args.models or "").split(",") if model.strip()]
+
+    if args.generate_model_returns:
+        if not args.use_case:
+            print("Error: --use-case is required with --generate-model-returns.", file=sys.stderr)
+            return 1
+        if not args.input:
+            print("Error: --input is required with --generate-model-returns.", file=sys.stderr)
+            return 1
+        if not model_names:
+            print("Error: --models must include at least one model name.", file=sys.stderr)
+            return 1
+        if args.max_tokens < 1:
+            print("Error: --max-tokens must be 1 or greater.", file=sys.stderr)
+            return 1
+        try:
+            tests = read_tests(args.input)
+        except (OSError, ValueError) as error:
+            print(f"Error: {error}", file=sys.stderr)
+            return 1
+
+        rows = run_model_returns(args.use_case, model_names, tests, args.max_tokens)
+        if rows is None:
+            return 1
+
+        try:
+            write_model_returns(args.model_returns_output, rows)
+        except OSError as error:
+            print(f"Error writing model returns CSV: {error}", file=sys.stderr)
+            return 1
+
+        print(f"Wrote {len(rows)} model return rows to {args.model_returns_output}")
+        return 0
 
     if not model_names:
         print("Error: --models must include at least one model name.", file=sys.stderr)
