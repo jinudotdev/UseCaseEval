@@ -1,4 +1,5 @@
 import json
+import re
 import sys
 
 from .csv_utils import strip_markdown_fences
@@ -9,6 +10,9 @@ from .ollama_client import (
     requests,
 )
 from .schemas import OLLAMA_CHAT_URL
+
+
+MAX_PARSE_ERROR_RAW_OUTPUT_CHARS = 500
 
 
 def build_judge_1_prompt(judge_task):
@@ -259,6 +263,22 @@ def judge_score_problem(message):
     }
 
 
+def trim_raw_judge_output(raw_judge_text):
+    cleaned = " ".join(str(raw_judge_text or "").split())
+    if not cleaned:
+        return "<empty>"
+    if len(cleaned) <= MAX_PARSE_ERROR_RAW_OUTPUT_CHARS:
+        return cleaned
+    return cleaned[:MAX_PARSE_ERROR_RAW_OUTPUT_CHARS] + "..."
+
+
+def judge_score_parse_failure(error_message, raw_judge_text):
+    return judge_score_problem(
+        "Judge output parse failed: "
+        f"{error_message}. Raw output: {trim_raw_judge_output(raw_judge_text)}"
+    )
+
+
 def normalize_judge_score_1_to_5(score):
     normalized_score = normalize_judge_score(score)
     if not 1 <= normalized_score <= 5:
@@ -266,23 +286,99 @@ def normalize_judge_score_1_to_5(score):
     return normalized_score
 
 
+def extract_fallback_score(raw_judge_text):
+    score_match = re.search(
+        r'(?is)"?(?:judge_)?score"?\s*[:=]\s*["\']?([1-5])(?:\.0)?["\']?\b',
+        raw_judge_text,
+    )
+    if not score_match:
+        return None
+    return int(score_match.group(1))
+
+
+def extract_fallback_pass_fail(raw_judge_text):
+    pass_fail_match = re.search(
+        r'(?is)"?(?:judge_)?pass_?fail"?\s*[:=]\s*["\']?(pass|fail)\b',
+        raw_judge_text,
+    )
+    if pass_fail_match:
+        return pass_fail_match.group(1).lower()
+
+    standalone_match = re.search(r"(?i)\b(pass|fail)\b", raw_judge_text)
+    if standalone_match:
+        return standalone_match.group(1).lower()
+
+    return None
+
+
+def extract_fallback_reason(raw_judge_text):
+    reason_match = re.search(
+        r'(?is)"?(?:reasoning|reason|judge_reason)"?\s*[:=]\s*"(.*?)"'
+        r'\s*(?=,?\s*"?(?:score|judge_score|pass_fail|judge_pass_fail)"?\s*[:=]|})',
+        raw_judge_text,
+    )
+    if reason_match:
+        return " ".join(reason_match.group(1).split())
+
+    without_score = re.sub(
+        r'(?is)"?(?:judge_)?score"?\s*[:=]\s*["\']?[1-5](?:\.0)?["\']?',
+        "",
+        raw_judge_text,
+    )
+    without_pass_fail = re.sub(
+        r'(?is)"?(?:judge_)?pass_?fail"?\s*[:=]\s*["\']?(?:pass|fail)["\']?',
+        "",
+        without_score,
+    )
+    reason = without_pass_fail.strip(" \t\r\n{}[],")
+    if reason:
+        return trim_raw_judge_output(reason)
+
+    return "Recovered score from malformed judge output."
+
+
+def parse_fallback_judge_score(raw_judge_text, threshold):
+    # Some local judge models produce nearly-JSON or prose even when asked for strict JSON.
+    # If strict parsing fails, recover the score from common structured patterns and keep
+    # pass/fail threshold-based so the scoring rule remains consistent.
+    score = extract_fallback_score(raw_judge_text)
+    if score is None:
+        return None
+
+    # Explicit pass/fail text is recognized, but the configured threshold remains
+    # the source of truth for the CSV pass/fail column.
+    _explicit_pass_fail = extract_fallback_pass_fail(raw_judge_text)
+    pass_fail = "pass" if score >= threshold else "fail"
+    return {
+        "judge_score": str(score),
+        "judge_reason": extract_fallback_reason(raw_judge_text),
+        "judge_pass_fail": pass_fail,
+    }
+
+
 def parse_judge_score_result(raw_judge_text, threshold):
     cleaned = strip_markdown_fences(raw_judge_text).strip()
     parsed, parse_error = extract_first_json_object(cleaned)
 
     if parsed is None:
-        return judge_score_problem(parse_error)
+        fallback_result = parse_fallback_judge_score(cleaned, threshold)
+        if fallback_result:
+            return fallback_result
+        return judge_score_parse_failure(parse_error, cleaned)
 
     try:
         score = normalize_judge_score_1_to_5(parsed.get("score"))
     except (TypeError, ValueError) as error:
-        return judge_score_problem(str(error))
+        fallback_result = parse_fallback_judge_score(cleaned, threshold)
+        if fallback_result:
+            return fallback_result
+        return judge_score_parse_failure(str(error), cleaned)
 
     reasoning = parsed.get("reasoning")
     if not isinstance(reasoning, str) or not reasoning.strip():
         reasoning = parsed.get("reason")
     if not isinstance(reasoning, str) or not reasoning.strip():
-        return judge_score_problem("Judge response is missing a non-empty reasoning.")
+        reasoning = "Judge returned a score without a reason."
 
     pass_fail = "pass" if score >= threshold else "fail"
     return {
