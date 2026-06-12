@@ -76,11 +76,16 @@ def write_judge_scores(output_path, rows):
 def read_judge_scores(input_path):
     with open(input_path, newline="", encoding="utf-8") as csv_file:
         reader = csv.DictReader(csv_file)
-        missing_columns = set(JUDGE_SCORES_COLUMNS) - set(reader.fieldnames or [])
+        required_columns = set(JUDGE_SCORES_COLUMNS) - {"judge_slot"}
+        missing_columns = required_columns - set(reader.fieldnames or [])
         if missing_columns:
             missing = ", ".join(sorted(missing_columns))
             raise ValueError(f"Judge scores CSV is missing required column(s): {missing}")
-        return list(reader)
+        rows = list(reader)
+        for row in rows:
+            if not row.get("judge_slot"):
+                row["judge_slot"] = "judge_1"
+        return rows
 
 
 def read_judge_tests(input_path):

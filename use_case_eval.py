@@ -24,7 +24,7 @@ from use_case_eval_core.csv_utils import (
 )
 from use_case_eval_core.generate_final_results import build_final_result_rows
 from use_case_eval_core.generate_judge_question import build_judge_question_rows
-from use_case_eval_core.generate_judge_scores import run_judge_1_batch, run_judge_scores
+from use_case_eval_core.generate_judge_scores import run_judge_1_batch, run_judge_scores_for_slots
 from use_case_eval_core.generate_model_returns import run_eval, run_model_returns
 from use_case_eval_core.ollama_client import requests
 from use_case_eval_core.generate_question import (
@@ -139,6 +139,11 @@ def parse_args():
         "--judge-model",
         default=None,
         help="Ollama model to use for generated judge scoring. Default comes from config [models].judge_1.",
+    )
+    parser.add_argument(
+        "--judge-2-model",
+        default=None,
+        help="Optional Ollama model to use for Judge 2. Default comes from config [models].judge_2.",
     )
     parser.add_argument(
         "--judge-pass-threshold",
@@ -313,12 +318,12 @@ def generate_judge_scores_file(
     args,
     judge_questions,
     model_returns,
-    judge_model,
+    judge_models,
 ):
-    judge_score_rows = run_judge_scores(
+    judge_score_rows = run_judge_scores_for_slots(
         judge_questions,
         model_returns,
-        judge_model,
+        judge_models,
         args.judge_pass_threshold,
         args.debug_judge_scores,
     )
@@ -398,10 +403,17 @@ def run_generate_model_returns_workflow(args):
 def run_generate_judge_scores_workflow(args):
     judge_model = args.judge_model
     try:
-        validate_model_roles(required_models=[("judge_1", judge_model)])
+        validation = validate_model_roles(
+            required_models=[("judge_1", judge_model)],
+            optional_models=[("judge_2", getattr(args, "judge_2_model", ""))],
+        )
+        judge_models = [("judge_1", judge_model)]
+        judge_2_model = validation["optional"].get("judge_2", "")
+        if judge_2_model:
+            judge_models.append(("judge_2", judge_2_model))
         judge_questions = read_judge_questions(args.judge_questions_input)
         model_returns = read_model_returns(args.model_returns_input)
-        generate_judge_scores_file(args, judge_questions, model_returns, judge_model)
+        generate_judge_scores_file(args, judge_questions, model_returns, judge_models)
     except (OSError, ValueError) as error:
         print(f"Error generating judge scores: {error}", file=sys.stderr)
         return 1
@@ -440,6 +452,9 @@ def run_full_pipeline(args):
         )
         model_names = validation["evaluated"]
         args.judge_2_model = validation["optional"].get("judge_2", "")
+        judge_models = [("judge_1", judge_model)]
+        if args.judge_2_model:
+            judge_models.append(("judge_2", args.judge_2_model))
 
         print("Starting full UseCaseEval pipeline.")
         print(f"Use case: {use_case}")
@@ -467,7 +482,7 @@ def run_full_pipeline(args):
         print(f"Step 4/5: Generate {args.judge_scores_output}")
         judge_questions = read_judge_questions(args.judge_questions_output)
         model_returns = read_model_returns(args.model_returns_output)
-        generate_judge_scores_file(args, judge_questions, model_returns, judge_model)
+        generate_judge_scores_file(args, judge_questions, model_returns, judge_models)
 
         print(f"Step 5/5: Generate {args.final_results_output}")
         model_returns = read_model_returns(args.model_returns_output)

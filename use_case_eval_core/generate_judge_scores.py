@@ -470,12 +470,13 @@ def run_judge_score(
         return judge_score_problem(error_message)
 
 
-def build_judge_score_row(model_return, judge_model, judge_result):
+def build_judge_score_row(model_return, judge_slot, judge_model, judge_result):
     return {
         "test_id": model_return["test_id"],
         "use_case": model_return["use_case"],
         "input": model_return["input"],
         "model_name": model_return["model_name"],
+        "judge_slot": judge_slot,
         "judge_model": judge_model,
         "judge_score": judge_result["judge_score"],
         "judge_reason": judge_result["judge_reason"],
@@ -489,6 +490,7 @@ def run_judge_scores(
     judge_model,
     threshold,
     debug_judge_scores=False,
+    judge_slot="judge_1",
 ):
     judge_questions_by_test_id = {
         judge_question["test_id"]: judge_question for judge_question in judge_questions
@@ -498,7 +500,7 @@ def run_judge_scores(
     for model_return in model_returns:
         test_id = model_return["test_id"]
         model_name = model_return["model_name"]
-        print(f"Scoring model return: {test_id} / {model_name}")
+        print(f"Scoring model return: {test_id} / {model_name} / {judge_slot}")
 
         judge_question = judge_questions_by_test_id.get(test_id)
         if judge_question is None:
@@ -513,10 +515,34 @@ def run_judge_scores(
             )
 
         print(
-            f"[{judge_model}] [{test_id}] [{model_name}] "
+            f"[{judge_model}] [{judge_slot}] [{test_id}] [{model_name}] "
             f"score={judge_result['judge_score']} "
             f"pass_fail={judge_result['judge_pass_fail']}"
         )
-        rows.append(build_judge_score_row(model_return, judge_model, judge_result))
+        rows.append(build_judge_score_row(model_return, judge_slot, judge_model, judge_result))
 
+    return rows
+
+
+def run_judge_scores_for_slots(
+    judge_questions,
+    model_returns,
+    judge_models,
+    threshold,
+    debug_judge_scores=False,
+):
+    rows = []
+    for judge_slot, judge_model in judge_models:
+        if not judge_model:
+            continue
+        rows.extend(
+            run_judge_scores(
+                judge_questions,
+                model_returns,
+                judge_model,
+                threshold,
+                debug_judge_scores,
+                judge_slot,
+            )
+        )
     return rows

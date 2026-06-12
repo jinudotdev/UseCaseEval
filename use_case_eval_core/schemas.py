@@ -51,6 +51,7 @@ JUDGE_SCORES_COLUMNS = [
     "use_case",
     "input",
     "model_name",
+    "judge_slot",
     "judge_model",
     "judge_score",
     "judge_reason",
