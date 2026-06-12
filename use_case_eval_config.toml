@@ -1,0 +1,24 @@
+[models]
+frontier = "qwen35-9b"
+judge_1 = "qwen35-9b"
+judge_2 = ""
+
+evaluated = [
+  "qwen25-15b-q4",
+  "llama32-1b-q4",
+  "tinyllama-11b-q4",
+  "smollm2-17b-q4",
+  "qwen25-05b-q8"
+]
+
+[run]
+num_tests = 10
+max_tokens = 220
+judge_pass_threshold = 4
+
+[paths]
+generated_questions = "generated_questions.csv"
+generated_judge_questions = "generated_judge_questions.csv"
+generated_model_returns = "generated_model_returns.csv"
+generated_judge_scores = "generated_judge_scores.csv"
+final_results = "final_results.csv"

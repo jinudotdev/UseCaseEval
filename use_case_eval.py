@@ -1,6 +1,12 @@
 import argparse
 import sys
 
+from use_case_eval_core.config import (
+    DEFAULT_CONFIG_PATH,
+    apply_config_defaults,
+    load_config,
+    validate_model_roles,
+)
 from use_case_eval_core.csv_utils import (
     parse_generated_tests,
     read_judge_questions,
@@ -16,51 +22,36 @@ from use_case_eval_core.csv_utils import (
     write_model_returns,
     write_results,
 )
-from use_case_eval_core.final_results_generation import build_final_result_rows
-from use_case_eval_core.judge_question_generation import build_judge_question_rows
-from use_case_eval_core.judge_scores_generation import run_judge_1_batch, run_judge_scores
-from use_case_eval_core.model_returns_generation import run_eval, run_model_returns
+from use_case_eval_core.generate_final_results import build_final_result_rows
+from use_case_eval_core.generate_judge_question import build_judge_question_rows
+from use_case_eval_core.generate_judge_scores import run_judge_1_batch, run_judge_scores
+from use_case_eval_core.generate_model_returns import run_eval, run_model_returns
 from use_case_eval_core.ollama_client import requests
-from use_case_eval_core.question_generation import (
+from use_case_eval_core.generate_question import (
     generate_tests_csv,
     prompt_for_use_case,
 )
 from use_case_eval_core.schemas import (
-    FINAL_RESULTS_OUTPUT,
-    GENERATED_QUESTIONS_OUTPUT,
     JUDGE_1_RESULTS_OUTPUT,
-    JUDGE_QUESTIONS_OUTPUT,
-    JUDGE_SCORES_OUTPUT,
     JUDGE_TESTS_OUTPUT,
-    MODEL_RETURNS_OUTPUT,
 )
-
-
-DEFAULT_NUM_TESTS = 10
-DEFAULT_GENERATOR_MODEL = "qwen35-9b"
-DEFAULT_JUDGE_QUESTION_GENERATOR_MODEL = "qwen35-9b"
-DEFAULT_JUDGE_MODEL = "qwen35-9b"
-DEFAULT_TESTED_MODELS = [
-    "qwen25-15b-q4",
-    "llama32-1b-q4",
-    "tinyllama-11b-q4",
-    "smollm2-17b-q4",
-    "qwen25-05b-q8",
-]
-DEFAULT_TESTED_MODELS_CSV = ",".join(DEFAULT_TESTED_MODELS)
-DEFAULT_MAX_TOKENS = 220
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Run local Ollama models against a shared CSV of prompts."
     )
+    parser.add_argument(
+        "--config",
+        default=DEFAULT_CONFIG_PATH,
+        help=f"TOML config path. Default: {DEFAULT_CONFIG_PATH}.",
+    )
     parser.add_argument("--use-case", help="Name of the use case being evaluated.")
     parser.add_argument(
         "--models",
         help=(
             "Comma-separated Ollama model names. "
-            f"Default for full/model-return workflows: {DEFAULT_TESTED_MODELS_CSV}."
+            "Default comes from config [models].evaluated."
         ),
     )
     parser.add_argument("--input", help="Input CSV path. Expected columns: test_id,input.")
@@ -68,8 +59,8 @@ def parse_args():
     parser.add_argument(
         "--max-tokens",
         type=int,
-        default=DEFAULT_MAX_TOKENS,
-        help=f"Maximum number of tokens to generate per response. Default: {DEFAULT_MAX_TOKENS}.",
+        default=None,
+        help="Maximum number of tokens to generate per response. Default comes from config [run].max_tokens.",
     )
     parser.add_argument(
         "--generate-tests",
@@ -79,19 +70,19 @@ def parse_args():
     parser.add_argument(
         "--num-tests",
         type=int,
-        default=DEFAULT_NUM_TESTS,
-        help=f"Number of questions to generate. Default: {DEFAULT_NUM_TESTS}.",
+        default=None,
+        help="Number of questions to generate. Default comes from config [run].num_tests.",
     )
     parser.add_argument(
         "--generator-model",
-        default=DEFAULT_GENERATOR_MODEL,
-        help=f"Ollama model to use for test generation. Default: {DEFAULT_GENERATOR_MODEL}.",
+        default=None,
+        help="Ollama model to use for test generation. Default comes from config [models].frontier.",
     )
     parser.add_argument(
         "--generated-questions",
         dest="generated_questions",
-        default=GENERATED_QUESTIONS_OUTPUT,
-        help=f"CSV path for generated questions. Default: {GENERATED_QUESTIONS_OUTPUT}.",
+        default=None,
+        help="CSV path for generated questions. Default comes from config [paths].generated_questions.",
     )
     parser.add_argument(
         "--generated-input",
@@ -111,8 +102,8 @@ def parse_args():
     )
     parser.add_argument(
         "--model-returns-output",
-        default=MODEL_RETURNS_OUTPUT,
-        help=f"Model returns output CSV path. Default: {MODEL_RETURNS_OUTPUT}.",
+        default=None,
+        help="Model returns output CSV path. Default comes from config [paths].generated_model_returns.",
     )
     parser.add_argument(
         "--generate-judge-scores",
@@ -121,33 +112,39 @@ def parse_args():
     )
     parser.add_argument(
         "--judge-questions-input",
-        default=".\\generated_judge_questions.csv",
-        help="Judge questions input CSV path. Default: .\\generated_judge_questions.csv.",
+        default=None,
+        help="Judge questions input CSV path. Default comes from config [paths].generated_judge_questions.",
+    )
+    parser.add_argument(
+        "--judge-questions-output",
+        default=None,
+        help="Judge questions output CSV path. Default comes from config [paths].generated_judge_questions.",
     )
     parser.add_argument(
         "--model-returns-input",
-        default=MODEL_RETURNS_OUTPUT,
-        help=f"Model returns input CSV path. Default: {MODEL_RETURNS_OUTPUT}.",
+        default=None,
+        help="Model returns input CSV path. Default comes from config [paths].generated_model_returns.",
     )
     parser.add_argument(
         "--judge-scores-output",
-        default=JUDGE_SCORES_OUTPUT,
-        help=f"Judge scores output CSV path. Default: {JUDGE_SCORES_OUTPUT}.",
+        default=None,
+        help="Judge scores output CSV path. Default comes from config [paths].generated_judge_scores.",
     )
     parser.add_argument(
         "--judge-scores-input",
-        default=JUDGE_SCORES_OUTPUT,
-        help=f"Judge scores input CSV path. Default: {JUDGE_SCORES_OUTPUT}.",
+        default=None,
+        help="Judge scores input CSV path. Default comes from config [paths].generated_judge_scores.",
     )
     parser.add_argument(
         "--judge-model",
-        help=f"Ollama model to use for generated judge scoring. Default: {DEFAULT_JUDGE_MODEL}.",
+        default=None,
+        help="Ollama model to use for generated judge scoring. Default comes from config [models].judge_1.",
     )
     parser.add_argument(
         "--judge-pass-threshold",
         type=int,
-        default=4,
-        help="Minimum generated judge score required to pass. Default: 4.",
+        default=None,
+        help="Minimum generated judge score required to pass. Default comes from config [run].judge_pass_threshold.",
     )
     parser.add_argument(
         "--debug-judge-scores",
@@ -161,8 +158,8 @@ def parse_args():
     )
     parser.add_argument(
         "--final-results-output",
-        default=FINAL_RESULTS_OUTPUT,
-        help=f"Final results output CSV path. Default: {FINAL_RESULTS_OUTPUT}.",
+        default=None,
+        help="Final results output CSV path. Default comes from config [paths].final_results.",
     )
     parser.add_argument(
         "--judge-1-model",
@@ -171,8 +168,8 @@ def parse_args():
     parser.add_argument(
         "--judge-1-threshold",
         type=int,
-        default=4,
-        help="Minimum Judge 1 score required to pass. Default: 4.",
+        default=None,
+        help="Minimum Judge 1 score required to pass. Default comes from config [run].judge_pass_threshold.",
     )
     parser.add_argument(
         "--debug-judge-1",
@@ -221,7 +218,7 @@ def parse_model_names(models):
 
 
 def resolve_model_names(args):
-    return parse_model_names(args.models) or list(DEFAULT_TESTED_MODELS)
+    return parse_model_names(args.models)
 
 
 def has_workflow_flag(args):
@@ -282,6 +279,7 @@ def generate_judge_questions_file(
     tests,
     use_case,
     generator_model,
+    output_path,
     debug_judge_question_generator=False,
 ):
     generator_label = generator_model or "fallback templates"
@@ -292,8 +290,8 @@ def generate_judge_questions_file(
         generator_model,
         debug_judge_question_generator,
     )
-    write_judge_questions(JUDGE_QUESTIONS_OUTPUT, judge_question_rows)
-    print(f"Wrote {len(judge_question_rows)} judge question rows to {JUDGE_QUESTIONS_OUTPUT}")
+    write_judge_questions(output_path, judge_question_rows)
+    print(f"Wrote {len(judge_question_rows)} judge question rows to {output_path}")
     return judge_question_rows
 
 
@@ -334,6 +332,7 @@ def generate_final_results_file(args, model_returns, judge_scores):
 
 def run_generate_tests_workflow(args):
     try:
+        validate_model_roles(required_models=[("frontier", args.generator_model)])
         generate_questions_file(args, resolve_use_case(args))
     except requests.exceptions.ConnectionError:
         print_ollama_connection_error()
@@ -350,11 +349,15 @@ def run_generate_tests_workflow(args):
 def run_export_judge_questions_workflow(args):
     input_path = args.input or args.generated_questions
     try:
+        validate_model_roles(
+            required_models=[("frontier", args.judge_question_generator_model)]
+        )
         tests = read_tests(input_path)
         generate_judge_questions_file(
             tests,
             resolve_use_case(args),
             args.judge_question_generator_model,
+            args.judge_questions_output,
             args.debug_judge_question_generator,
         )
     except requests.exceptions.ConnectionError:
@@ -371,8 +374,17 @@ def run_export_judge_questions_workflow(args):
 
 def run_generate_model_returns_workflow(args):
     try:
+        validation = validate_model_roles(
+            evaluated_models=resolve_model_names(args),
+            require_evaluated=True,
+        )
         tests = read_tests(args.input or args.generated_questions)
-        rows = generate_model_returns_file(args, resolve_use_case(args), resolve_model_names(args), tests)
+        rows = generate_model_returns_file(
+            args,
+            resolve_use_case(args),
+            validation["evaluated"],
+            tests,
+        )
     except (OSError, ValueError) as error:
         print(f"Error generating model returns: {error}", file=sys.stderr)
         return 1
@@ -380,8 +392,9 @@ def run_generate_model_returns_workflow(args):
 
 
 def run_generate_judge_scores_workflow(args):
-    judge_model = args.judge_model or DEFAULT_JUDGE_MODEL
+    judge_model = args.judge_model
     try:
+        validate_model_roles(required_models=[("judge_1", judge_model)])
         judge_questions = read_judge_questions(args.judge_questions_input)
         model_returns = read_model_returns(args.model_returns_input)
         generate_judge_scores_file(args, judge_questions, model_returns, judge_model)
@@ -405,14 +418,24 @@ def run_generate_final_results_workflow(args):
 def run_full_pipeline(args):
     use_case = resolve_use_case(args)
     model_names = resolve_model_names(args)
-    judge_question_generator_model = (
-        args.judge_question_generator_model or DEFAULT_JUDGE_QUESTION_GENERATOR_MODEL
-    )
-    judge_model = args.judge_model or DEFAULT_JUDGE_MODEL
+    judge_question_generator_model = args.judge_question_generator_model
+    judge_model = args.judge_model
 
     try:
         validate_positive(args.num_tests, "--num-tests")
         validate_positive(args.max_tokens, "--max-tokens")
+        validation = validate_model_roles(
+            required_models=[
+                ("frontier", args.generator_model),
+                ("judge-question generator", judge_question_generator_model),
+                ("judge_1", judge_model),
+            ],
+            optional_models=[("judge_2", getattr(args, "judge_2_model", ""))],
+            evaluated_models=model_names,
+            require_evaluated=True,
+        )
+        model_names = validation["evaluated"]
+        args.judge_2_model = validation["optional"].get("judge_2", "")
 
         print("Starting full UseCaseEval pipeline.")
         print(f"Use case: {use_case}")
@@ -421,12 +444,13 @@ def run_full_pipeline(args):
         print(f"Step 1/5: Generate {args.generated_questions}")
         generate_questions_file(args, use_case)
 
-        print(f"Step 2/5: Generate {JUDGE_QUESTIONS_OUTPUT}")
+        print(f"Step 2/5: Generate {args.judge_questions_output}")
         tests = read_tests(args.generated_questions)
         generate_judge_questions_file(
             tests,
             use_case,
             judge_question_generator_model,
+            args.judge_questions_output,
             args.debug_judge_question_generator,
         )
 
@@ -437,7 +461,7 @@ def run_full_pipeline(args):
             return 1
 
         print(f"Step 4/5: Generate {args.judge_scores_output}")
-        judge_questions = read_judge_questions(JUDGE_QUESTIONS_OUTPUT)
+        judge_questions = read_judge_questions(args.judge_questions_output)
         model_returns = read_model_returns(args.model_returns_output)
         generate_judge_scores_file(args, judge_questions, model_returns, judge_model)
 
@@ -502,6 +526,14 @@ def run_legacy_eval_workflow(args):
 
 def main():
     args = parse_args()
+
+    try:
+        config = load_config(args.config)
+        apply_config_defaults(args, config)
+    except (OSError, ValueError) as error:
+        print(f"Error loading config: {error}", file=sys.stderr)
+        return 1
+
     judge_1_model = args.judge_1_model.strip() if args.judge_1_model else None
 
     if args.generate_final_results:
@@ -522,6 +554,7 @@ def main():
             print("Error: --judge-1-model is required with --run-judge-1.", file=sys.stderr)
             return 1
         try:
+            validate_model_roles(required_models=[("judge_1", judge_1_model)])
             judge_tasks = read_judge_tests(args.judge_1_input)
             judge_1_rows = run_judge_1_batch(
                 judge_tasks,

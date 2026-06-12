@@ -1,4 +1,5 @@
 OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
+OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
 
 GENERATED_QUESTIONS_OUTPUT = "generated_questions.csv"
 JUDGE_TESTS_OUTPUT = "generated_judge_tests.csv"
