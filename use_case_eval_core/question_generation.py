@@ -77,7 +77,7 @@ def generate_tests_csv(generator_model, use_case, num_tests, debug_generator=Fal
 
 def prompt_for_use_case():
     while True:
-        use_case = input("What use case do you want to test? ").strip()
+        use_case = input("What use case would you like to evaluate? ").strip()
         if use_case:
             return use_case
         print("Please enter a use case.")
