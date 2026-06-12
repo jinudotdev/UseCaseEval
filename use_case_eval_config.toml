@@ -1,7 +1,7 @@
 [models]
 frontier = "qwen35-9b"
-judge_1 = "gemma4-12b-q4"
-judge_2 = ""
+judge_1 = "qwen35-9b"
+judge_2 = "gemma4-12b-q4"
 
 evaluated = [
   "qwen25-15b-q4",
