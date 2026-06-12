@@ -268,6 +268,10 @@ def generate_questions_file(args, use_case):
     except ValueError:
         print("Raw generator output:", file=sys.stderr)
         print(repr(raw_generated_csv), file=sys.stderr)
+        print(
+            f"No new generated questions were written; any previous {args.generated_questions} was not overwritten.",
+            file=sys.stderr,
+        )
         raise
 
     write_generated_tests(args.generated_questions, tests)

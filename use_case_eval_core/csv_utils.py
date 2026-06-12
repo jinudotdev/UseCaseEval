@@ -1,5 +1,4 @@
 import csv
-import io
 import re
 
 from .schemas import (
@@ -137,26 +136,39 @@ def clean_generated_csv_text(raw_csv):
     return cleaned
 
 
+def split_generated_line(line, row_label):
+    if "," not in line:
+        raise ValueError(f"Generated CSV {row_label} is missing the test_id/input separator comma.")
+    first_field, input_text = line.split(",", 1)
+    return first_field.strip(), strip_wrapping_quotes(input_text.strip())
+
+
+def strip_wrapping_quotes(value):
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        quote_char = value[0]
+        value = value[1:-1].strip()
+        if quote_char == '"':
+            value = value.replace('""', '"')
+    return value
+
+
 def parse_generated_tests(raw_csv, use_case, num_tests):
     cleaned_csv = clean_generated_csv_text(raw_csv)
-
-    try:
-        reader = csv.reader(io.StringIO(cleaned_csv), strict=True)
-        rows = list(reader)
-    except csv.Error as error:
-        raise ValueError(f"Generated CSV could not be parsed: {error}") from error
+    rows = [line.strip() for line in cleaned_csv.splitlines() if line.strip()]
 
     if not rows:
         raise ValueError("Generated CSV is empty.")
 
-    normalized_headers = [normalize_generated_header(header) for header in rows[0]]
+    header_id, header_input = split_generated_line(rows[0], "header")
+    normalized_headers = [
+        normalize_generated_header(header_id),
+        normalize_generated_header(header_input),
+    ]
     missing_columns = {"test_id", "input"} - set(normalized_headers)
     if missing_columns:
         missing = ", ".join(sorted(missing_columns))
         raise ValueError(f"Generated CSV is missing required column(s): {missing}")
 
-    test_id_index = normalized_headers.index("test_id")
-    input_index = normalized_headers.index("input")
     data_rows = rows[1:]
 
     if len(data_rows) != num_tests:
@@ -164,12 +176,8 @@ def parse_generated_tests(raw_csv, use_case, num_tests):
 
     prefix = slugify_use_case(use_case)
     tests = []
-    for index, row in enumerate(data_rows, start=1):
-        if len(row) <= max(test_id_index, input_index):
-            raise ValueError(f"Generated CSV row {index} is missing required field(s).")
-        if len(row) > len(normalized_headers):
-            raise ValueError(f"Generated CSV row {index} has extra unquoted field(s).")
-        prompt = row[input_index].strip()
+    for index, line in enumerate(data_rows, start=1):
+        _, prompt = split_generated_line(line, f"row {index}")
         if not prompt:
             raise ValueError(f"Generated CSV row {index} has an empty input.")
         tests.append(

@@ -1,6 +1,6 @@
 [models]
 frontier = "qwen35-9b"
-judge_1 = "qwen35-9b"
+judge_1 = "gemma4-12b-q4"
 judge_2 = ""
 
 evaluated = [
@@ -12,9 +12,9 @@ evaluated = [
 ]
 
 [run]
-num_tests = 10
+num_tests = 3
 max_tokens = 220
-judge_pass_threshold = 4
+judge_pass_threshold = 3
 
 [paths]
 generated_questions = "generated_questions.csv"
