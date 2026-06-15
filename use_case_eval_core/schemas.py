@@ -30,6 +30,7 @@ MODEL_RESULT_COLUMNS = [
     "judge_2_score",
     "judge_2_reason",
     "judge_2_pass_fail",
+    "combined_judge_result",
     "human_score",
     "human_notes",
 ]

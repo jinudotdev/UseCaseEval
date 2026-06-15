@@ -35,10 +35,32 @@ def format_join_key(join_key):
     return " / ".join(join_key)
 
 
+def normalize_pass_fail(value):
+    normalized = (value or "").strip().lower()
+    if normalized in {"pass", "fail"}:
+        return normalized
+    return ""
+
+
+def combine_judge_results(judge_1_pass_fail, judge_2_pass_fail):
+    judge_1_result = normalize_pass_fail(judge_1_pass_fail)
+    judge_2_result = normalize_pass_fail(judge_2_pass_fail)
+
+    if judge_1_result and judge_2_result:
+        if judge_1_result == judge_2_result:
+            return judge_1_result
+        return "mixed"
+
+    return judge_1_result or judge_2_result
+
+
 def build_final_result_row(model_return, judge_scores=None):
     judge_scores = judge_scores or {}
     judge_1_score = judge_scores.get("judge_1", {})
     judge_2_score = judge_scores.get("judge_2", {})
+    judge_1_pass_fail = judge_1_score.get("judge_pass_fail", "")
+    judge_2_pass_fail = judge_2_score.get("judge_pass_fail", "")
+
     return {
         "test_id": model_return["test_id"],
         "use_case": model_return["use_case"],
@@ -50,11 +72,15 @@ def build_final_result_row(model_return, judge_scores=None):
         "judge_1_model": judge_1_score.get("judge_model", ""),
         "judge_1_score": judge_1_score.get("judge_score", ""),
         "judge_1_reason": judge_1_score.get("judge_reason", ""),
-        "judge_1_pass_fail": judge_1_score.get("judge_pass_fail", ""),
+        "judge_1_pass_fail": judge_1_pass_fail,
         "judge_2_model": judge_2_score.get("judge_model", ""),
         "judge_2_score": judge_2_score.get("judge_score", ""),
         "judge_2_reason": judge_2_score.get("judge_reason", ""),
-        "judge_2_pass_fail": judge_2_score.get("judge_pass_fail", ""),
+        "judge_2_pass_fail": judge_2_pass_fail,
+        "combined_judge_result": combine_judge_results(
+            judge_1_pass_fail,
+            judge_2_pass_fail,
+        ),
         "human_score": "",
         "human_notes": "",
     }
@@ -67,7 +93,9 @@ def build_final_result_rows(model_returns, judge_scores):
     for model_return in model_returns:
         join_key = make_join_key(model_return)
         judge_scores_for_row = judge_scores_by_key.get(join_key)
-        if judge_scores_for_row is None or "judge_1" not in judge_scores_for_row:
+        if judge_scores_for_row is None or not any(
+            judge_slot in judge_scores_for_row for judge_slot in ("judge_1", "judge_2")
+        ):
             raise ValueError(f"Missing judge score row for join key: {format_join_key(join_key)}")
         rows.append(
             build_final_result_row(

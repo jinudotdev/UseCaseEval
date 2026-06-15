@@ -29,6 +29,7 @@ from use_case_eval_core.generate_model_returns import run_eval, run_model_return
 from use_case_eval_core.ollama_client import requests
 from use_case_eval_core.generate_question import (
     generate_tests_csv,
+    prompt_for_use_case_context,
     prompt_for_use_case,
 )
 from use_case_eval_core.schemas import (
@@ -47,6 +48,13 @@ def parse_args():
         help=f"TOML config path. Default: {DEFAULT_CONFIG_PATH}.",
     )
     parser.add_argument("--use-case", help="Name of the use case being evaluated.")
+    parser.add_argument(
+        "--use-case-context",
+        help=(
+            "Optional description of target users, interface, expected tasks, "
+            "available capabilities, and important limitations."
+        ),
+    )
     parser.add_argument(
         "--models",
         help=(
@@ -245,6 +253,27 @@ def resolve_use_case(args):
     return prompt_for_use_case()
 
 
+def normalize_use_case_context(use_case_context):
+    return (use_case_context or "").strip()
+
+
+def resolve_use_case_context(args, prompt=False):
+    context = normalize_use_case_context(args.use_case_context)
+    if context:
+        return context
+
+    if prompt:
+        context = prompt_for_use_case_context()
+        if context:
+            return context
+
+    print(
+        "No use-case context supplied. Generated tests may interpret the use case differently than intended.",
+        file=sys.stderr,
+    )
+    return ""
+
+
 def validate_positive(value, option_name):
     if value < 1:
         raise ValueError(f"{option_name} must be 1 or greater.")
@@ -258,13 +287,14 @@ def print_ollama_connection_error():
     )
 
 
-def generate_questions_file(args, use_case):
+def generate_questions_file(args, use_case, use_case_context=""):
     validate_positive(args.num_tests, "--num-tests")
     print(f"Generating {args.num_tests} question(s) with {args.generator_model}...")
 
     raw_generated_csv = generate_tests_csv(
         args.generator_model,
         use_case,
+        use_case_context,
         args.num_tests,
         args.debug_generator,
     )
@@ -342,7 +372,8 @@ def generate_final_results_file(args, model_returns, judge_scores):
 def run_generate_tests_workflow(args):
     try:
         validate_model_roles(required_models=[("frontier", args.generator_model)])
-        generate_questions_file(args, resolve_use_case(args))
+        use_case = resolve_use_case(args)
+        generate_questions_file(args, use_case, resolve_use_case_context(args))
     except requests.exceptions.ConnectionError:
         print_ollama_connection_error()
         return 1
@@ -433,6 +464,7 @@ def run_generate_final_results_workflow(args):
 
 def run_full_pipeline(args):
     use_case = resolve_use_case(args)
+    use_case_context = resolve_use_case_context(args, prompt=not args.use_case)
     model_names = resolve_model_names(args)
     judge_question_generator_model = args.judge_question_generator_model
     judge_model = args.judge_model
@@ -461,7 +493,7 @@ def run_full_pipeline(args):
         print(f"Tested models: {','.join(model_names)}")
 
         print(f"Step 1/5: Generate {args.generated_questions}")
-        generate_questions_file(args, use_case)
+        generate_questions_file(args, use_case, use_case_context)
 
         print(f"Step 2/5: Generate {args.judge_questions_output}")
         tests = read_tests(args.generated_questions)
