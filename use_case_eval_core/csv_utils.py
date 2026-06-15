@@ -19,7 +19,15 @@ def read_tests(input_path):
         if missing_columns:
             missing = ", ".join(sorted(missing_columns))
             raise ValueError(f"Input CSV is missing required column(s): {missing}")
-        return list(reader)
+        rows = list(reader)
+        add_missing_context_columns(rows)
+        return rows
+
+
+def add_missing_context_columns(rows):
+    for row in rows:
+        row.setdefault("use_case", "")
+        row.setdefault("use_case_context", "")
 
 
 def write_csv(output_path, fieldnames, rows):
@@ -48,11 +56,14 @@ def write_model_returns(output_path, rows):
 def read_model_returns(input_path):
     with open(input_path, newline="", encoding="utf-8") as csv_file:
         reader = csv.DictReader(csv_file)
-        missing_columns = set(MODEL_RETURNS_COLUMNS) - set(reader.fieldnames or [])
+        required_columns = set(MODEL_RETURNS_COLUMNS) - {"use_case_context"}
+        missing_columns = required_columns - set(reader.fieldnames or [])
         if missing_columns:
             missing = ", ".join(sorted(missing_columns))
             raise ValueError(f"Model returns CSV is missing required column(s): {missing}")
-        return list(reader)
+        rows = list(reader)
+        add_missing_context_columns(rows)
+        return rows
 
 
 def write_judge_questions(output_path, rows):
@@ -62,11 +73,14 @@ def write_judge_questions(output_path, rows):
 def read_judge_questions(input_path):
     with open(input_path, newline="", encoding="utf-8") as csv_file:
         reader = csv.DictReader(csv_file)
-        missing_columns = set(JUDGE_QUESTION_COLUMNS) - set(reader.fieldnames or [])
+        required_columns = set(JUDGE_QUESTION_COLUMNS) - {"use_case", "use_case_context"}
+        missing_columns = required_columns - set(reader.fieldnames or [])
         if missing_columns:
             missing = ", ".join(sorted(missing_columns))
             raise ValueError(f"Judge questions CSV is missing required column(s): {missing}")
-        return list(reader)
+        rows = list(reader)
+        add_missing_context_columns(rows)
+        return rows
 
 
 def write_judge_scores(output_path, rows):
@@ -76,12 +90,13 @@ def write_judge_scores(output_path, rows):
 def read_judge_scores(input_path):
     with open(input_path, newline="", encoding="utf-8") as csv_file:
         reader = csv.DictReader(csv_file)
-        required_columns = set(JUDGE_SCORES_COLUMNS) - {"judge_slot"}
+        required_columns = set(JUDGE_SCORES_COLUMNS) - {"judge_slot", "use_case_context"}
         missing_columns = required_columns - set(reader.fieldnames or [])
         if missing_columns:
             missing = ", ".join(sorted(missing_columns))
             raise ValueError(f"Judge scores CSV is missing required column(s): {missing}")
         rows = list(reader)
+        add_missing_context_columns(rows)
         for row in rows:
             if not row.get("judge_slot"):
                 row["judge_slot"] = "judge_1"
@@ -157,7 +172,7 @@ def strip_wrapping_quotes(value):
     return value
 
 
-def parse_generated_tests(raw_csv, use_case, num_tests):
+def parse_generated_tests(raw_csv, use_case, use_case_context, num_tests):
     cleaned_csv = clean_generated_csv_text(raw_csv)
     rows = [line.strip() for line in cleaned_csv.splitlines() if line.strip()]
 
@@ -188,6 +203,8 @@ def parse_generated_tests(raw_csv, use_case, num_tests):
         tests.append(
             {
                 "test_id": f"{prefix}_{index:03d}",
+                "use_case": use_case,
+                "use_case_context": use_case_context or "",
                 "input": prompt,
             }
         )

@@ -62,7 +62,13 @@ def parse_args():
             "Default comes from config [models].evaluated."
         ),
     )
-    parser.add_argument("--input", help="Input CSV path. Expected columns: test_id,input.")
+    parser.add_argument(
+        "--input",
+        help=(
+            "Input CSV path. Expected columns: test_id,use_case,use_case_context,input. "
+            "Older test_id,input files are still supported."
+        ),
+    )
     parser.add_argument("--output", help="Output CSV path for model responses.")
     parser.add_argument(
         "--max-tokens",
@@ -299,7 +305,12 @@ def generate_questions_file(args, use_case, use_case_context=""):
         args.debug_generator,
     )
     try:
-        tests = parse_generated_tests(raw_generated_csv, use_case, args.num_tests)
+        tests = parse_generated_tests(
+            raw_generated_csv,
+            use_case,
+            use_case_context,
+            args.num_tests,
+        )
     except ValueError:
         print("Raw generator output:", file=sys.stderr)
         print(repr(raw_generated_csv), file=sys.stderr)
@@ -317,6 +328,7 @@ def generate_questions_file(args, use_case, use_case_context=""):
 def generate_judge_questions_file(
     tests,
     use_case,
+    use_case_context,
     generator_model,
     output_path,
     debug_judge_question_generator=False,
@@ -326,6 +338,7 @@ def generate_judge_questions_file(
     judge_question_rows = build_judge_question_rows(
         tests,
         use_case,
+        use_case_context,
         generator_model,
         debug_judge_question_generator,
     )
@@ -336,7 +349,13 @@ def generate_judge_questions_file(
 
 def generate_model_returns_file(args, use_case, model_names, tests):
     validate_positive(args.max_tokens, "--max-tokens")
-    rows = run_model_returns(use_case, model_names, tests, args.max_tokens)
+    rows = run_model_returns(
+        use_case,
+        model_names,
+        tests,
+        args.max_tokens,
+        normalize_use_case_context(args.use_case_context),
+    )
     if rows is None:
         return None
     write_model_returns(args.model_returns_output, rows)
@@ -396,6 +415,7 @@ def run_export_judge_questions_workflow(args):
         generate_judge_questions_file(
             tests,
             resolve_use_case(args),
+            normalize_use_case_context(args.use_case_context),
             args.judge_question_generator_model,
             args.judge_questions_output,
             args.debug_judge_question_generator,
@@ -500,6 +520,7 @@ def run_full_pipeline(args):
         generate_judge_questions_file(
             tests,
             use_case,
+            use_case_context,
             judge_question_generator_model,
             args.judge_questions_output,
             args.debug_judge_question_generator,
@@ -561,7 +582,13 @@ def run_legacy_eval_workflow(args):
         print(f"Error: {error}", file=sys.stderr)
         return 1
 
-    rows = run_eval(args.use_case, model_names, tests, args.max_tokens)
+    rows = run_eval(
+        args.use_case,
+        model_names,
+        tests,
+        args.max_tokens,
+        normalize_use_case_context(args.use_case_context),
+    )
     if rows is None:
         return 1
 

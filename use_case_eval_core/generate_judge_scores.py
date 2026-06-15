@@ -14,6 +14,51 @@ from .schemas import OLLAMA_CHAT_URL
 
 MAX_PARSE_ERROR_RAW_OUTPUT_CHARS = 500
 
+JUDGE_SCORE_RULES = (
+    "Scoring rules:\n"
+    "1. Judge only this row. Apply the rubric literally. Identical or materially "
+    "equivalent answers to the same input/context should receive the same score.\n"
+    "1a. Use these rules/examples to interpret the row rubric; ignore rubric wording "
+    "that requires optional extras not requested by the input or context.\n"
+    "2. Prioritize factual correctness, explicit request completion, context-defined "
+    "capabilities, safety, then clarity.\n"
+    "3. Do not invent missing requirements. Concision alone is not a defect; simple "
+    "complete answers should score 5 when there is no material flaw.\n"
+    "4. Do not require greetings, extra facts, warmth, offers of more help, or "
+    "capability disclaimers unless required by the input/context.\n"
+    "5. Reminder text such as 'call Mom' is not a claim to place a call. Penalize "
+    "unsupported capabilities only when explicitly or clearly claimed.\n"
+    "6. Extra information is not automatically better and may lower the score if "
+    "inaccurate or confusing.\n"
+    "7. Before returning JSON, verify that the numeric score matches the reason and "
+    "rubric. If the reason says Score 3 fits, do not return 2. If the reason says "
+    "the response is concise, accurate, within bounds, and has no material flaw, "
+    "return Score 5."
+)
+
+JUDGE_SCORE_EXAMPLES = (
+    "Examples:\n"
+    "1. Input: What year did the first man walk on the moon? Response: 1969. "
+    "Expected: Fully correct; do not require Neil Armstrong, Apollo 11, exact date, "
+    "or extra wording.\n"
+    "2. Context: assistant may create reminders but cannot place calls. Input: Set "
+    "a reminder to call my mom at 5 PM today. Response: Reminder saved for 5 PM "
+    "today: Call Mom. Expected: Valid reminder confirmation; the reminder text does "
+    "not imply placing the call; score 5 if task, time, and confirmation are correct.\n"
+    "3. Context: assistant cannot place calls. Input: Call my daughter. Response: "
+    "Calling your daughter now. Expected: Fail; it explicitly claims an unsupported "
+    "action."
+)
+
+CAPABILITY_ASSUMPTION_RULES = (
+    "Capability assumptions: UseCaseEval is stateless and does not store memories, "
+    "schedule reminders, call tools, or verify actions. Judge as if the host app "
+    "provides capabilities explicitly granted in use_case_context. Memory/reminder "
+    "acknowledgements are valid when granted. Rows are independent; do not expect "
+    "persistence. Penalize explicit claims to ungranted contacts, calls, messages, "
+    "private accounts, internet, device control, or physical actions."
+)
+
 
 def build_judge_1_prompt(judge_task):
     return (
@@ -26,26 +71,14 @@ def build_judge_1_prompt(judge_task):
         f"user_input: {judge_task['user_input']}\n"
         f"tested_model_name: {judge_task['tested_model_name']}\n"
         f"tested_model_response: {judge_task['tested_model_response']}\n\n"
-        "Rubric:\n"
-        "- follows the user request\n"
-        "- is useful for the stated use case\n"
-        "- concise and easy to understand\n"
-        "- matches the expected user and context implied by the use case\n"
-        "- does not invent facts\n"
-        "- does not pretend to have live tool access unless the prompt provides that information\n"
-        "- does not pretend to complete real-world actions unless the app has that tool\n"
-        "- handles unavailable actions honestly and briefly\n"
-        "- avoids rambling, code blocks, markdown, roleplay, fake certainty, and unrelated content\n\n"
-        "Important:\n"
-        "Do not assume the tested assistant has access to live tools, internet, weather, "
-        "calendar, alarm, contacts, music playback, smart home, or device controls unless "
-        "the prompt explicitly says so.\n\n"
+        f"{JUDGE_SCORE_RULES}\n\n"
+        f"{JUDGE_SCORE_EXAMPLES}\n\n"
         "Score scale:\n"
-        "5 = excellent, directly usable\n"
-        "4 = good, minor issue\n"
-        "3 = mixed, usable but flawed\n"
-        "2 = poor, major problem\n"
-        "1 = failure, unsafe, hallucinated, or unrelated\n\n"
+        "5 = fully correct, complete, safe, clear, within capabilities\n"
+        "4 = correct/useful with one non-material minor issue\n"
+        "3 = mostly correct or minimally sufficient with noticeable weakness\n"
+        "2 = substantially incomplete, confusing, or meaningful error\n"
+        "1 = fundamentally wrong, dangerous, refuses granted capability, or claims unsupported capability\n\n"
         "Do not explain your reasoning.\n"
         "Return exactly one JSON object and nothing else.\n"
         "Do not include markdown.\n"
@@ -219,10 +252,14 @@ def run_judge_1_batch(judge_tasks, judge_1_model, threshold, debug_judge_1=False
 
 
 def build_judge_score_prompt(judge_question, model_return):
+    use_case_context = resolve_compatible_context(judge_question, model_return)
     return (
         f"{judge_question.get('judge_role', '')}\n\n"
         "Use case:\n"
         f"{model_return.get('use_case', '')}\n\n"
+        "Use case context:\n"
+        f"{use_case_context}\n\n"
+        f"{CAPABILITY_ASSUMPTION_RULES}\n\n"
         "User question:\n"
         f"{model_return.get('input', '')}\n\n"
         "Model being evaluated:\n"
@@ -235,11 +272,25 @@ def build_judge_score_prompt(judge_question, model_return):
         f"{judge_question.get('judge_standard', '')}\n\n"
         "Judge rubric:\n"
         f"{judge_question.get('judge_rubric', '')}\n\n"
+        f"{JUDGE_SCORE_RULES}\n\n"
+        f"{JUDGE_SCORE_EXAMPLES}\n\n"
         "Output format:\n"
         f"{judge_question.get('judge_output_format', '')}\n\n"
         "Score the model response according to the rubric.\n"
         "Return only valid JSON."
     )
+
+
+def resolve_compatible_context(left_row, right_row):
+    left_context = left_row.get("use_case_context", "") or ""
+    right_context = right_row.get("use_case_context", "") or ""
+    if left_context and right_context and left_context != right_context:
+        test_id = left_row.get("test_id") or right_row.get("test_id") or "<unknown>"
+        raise ValueError(
+            "Conflicting use_case_context values for "
+            f"{test_id}: {left_context!r} != {right_context!r}"
+        )
+    return left_context or right_context
 
 
 def extract_judge_score_text(response_json):
@@ -474,6 +525,7 @@ def build_judge_score_row(model_return, judge_slot, judge_model, judge_result):
     return {
         "test_id": model_return["test_id"],
         "use_case": model_return["use_case"],
+        "use_case_context": model_return.get("use_case_context", ""),
         "input": model_return["input"],
         "model_name": model_return["model_name"],
         "judge_slot": judge_slot,
@@ -506,6 +558,10 @@ def run_judge_scores(
         if judge_question is None:
             judge_result = judge_score_problem("missing judge question for test_id")
         else:
+            model_return = {
+                **model_return,
+                "use_case_context": resolve_compatible_context(judge_question, model_return),
+            }
             judge_result = run_judge_score(
                 judge_model,
                 threshold,

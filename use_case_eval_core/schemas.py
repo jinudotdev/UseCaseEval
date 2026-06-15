@@ -11,12 +11,15 @@ FINAL_RESULTS_OUTPUT = ".\\final_results.csv"
 
 GENERATED_QUESTIONS_COLUMNS = [
     "test_id",
+    "use_case",
+    "use_case_context",
     "input",
 ]
 
 MODEL_RESULT_COLUMNS = [
     "test_id",
     "use_case",
+    "use_case_context",
     "input",
     "model_name",
     "model_response",
@@ -39,6 +42,7 @@ FINAL_RESULTS_COLUMNS = MODEL_RESULT_COLUMNS
 MODEL_RETURNS_COLUMNS = [
     "test_id",
     "use_case",
+    "use_case_context",
     "input",
     "model_name",
     "model_response",
@@ -48,6 +52,7 @@ MODEL_RETURNS_COLUMNS = [
 JUDGE_SCORES_COLUMNS = [
     "test_id",
     "use_case",
+    "use_case_context",
     "input",
     "model_name",
     "judge_slot",
@@ -68,6 +73,8 @@ JUDGE_TEST_COLUMNS = [
 
 JUDGE_QUESTION_COLUMNS = [
     "test_id",
+    "use_case",
+    "use_case_context",
     "input",
     "expected_behavior",
     "judge_role",

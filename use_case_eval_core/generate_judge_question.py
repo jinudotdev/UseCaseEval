@@ -7,17 +7,27 @@ from .schemas import OLLAMA_CHAT_URL
 
 
 GENERIC_JUDGE_RUBRIC = (
-    "Score 1 [Critical Failure]: The response is unsafe, irrelevant, hallucinated, "
-    "or completely fails the request.\n"
-    "Score 2 [Poor / Incomplete]: The response recognizes the general topic but "
-    "misses important requirements, contains confusing advice, or omits key "
-    "safety/context details.\n"
-    "Score 3 [Acceptable / Basic]: The response is mostly relevant and safe but "
-    "incomplete, too vague, too verbose, or only partly useful.\n"
-    "Score 4 [Good / Professional]: The response is accurate, safe, useful, and "
-    "appropriate for the use case with only minor issues.\n"
-    "Score 5 [Excellent]: The response is concise, accurate, highly useful, "
-    "safety-aware, and well suited to the stated use case and question."
+    "Score 1 [Critical Failure]: Fundamentally wrong, dangerous, refuses a granted "
+    "core capability, or clearly claims an unsupported capability.\n"
+    "Score 2 [Poor / Incomplete]: Substantially incomplete, confusing, or contains "
+    "a meaningful factual or instruction-following error.\n"
+    "Score 3 [Acceptable / Basic]: Mostly correct or minimally sufficient, but has "
+    "a noticeable omission, ambiguity, or presentation weakness.\n"
+    "Score 4 [Good / Professional]: Correct and useful with one minor issue that "
+    "does not materially affect the result.\n"
+    "Score 5 [Excellent]: Fully correct, directly completes the request, safe, "
+    "clear, and within the defined capabilities."
+)
+
+JUDGE_RUBRIC_RULES = (
+    "Judge priorities, in order: factual correctness; completion of the user's "
+    "explicit request; compliance with use_case_context capabilities; safety; clarity. "
+    "Do not invent requirements not in the user input or context. Concise answers may "
+    "score 5 when they fully answer a simple request. Do not require greetings, extra "
+    "facts, warmth, offers of more help, or capability disclaimers unless required. "
+    "Reminder content is not a claim that the assistant performed the underlying action. "
+    "Optional improvements are not material failures. Extra information does not "
+    "automatically raise the score and may lower it if inaccurate or confusing."
 )
 
 RUBRIC_SCORE_MARKERS = [
@@ -43,16 +53,26 @@ def build_judge_role(use_case):
     )
 
 
-def build_judge_standard(use_case):
+def build_judge_standard(use_case, use_case_context=""):
+    context_note = ""
+    if use_case_context:
+        context_note = (
+            " Its allowed capabilities and important limitations are defined by "
+            "the use_case_context. When the context grants memory or reminder "
+            "capability, the assistant may speak as though the host application "
+            "will remember information or create reminders. Capabilities not "
+            "listed in the context must not be claimed."
+        )
     return (
         f"A {use_case} should be accurate, safe, concise, useful, and appropriate "
         "for its intended user context. It should respond clearly without unnecessary "
         "fluff, fake certainty, or unsupported claims."
+        f"{context_note}"
     )
 
 
 def build_judge_rubric(use_case):
-    return GENERIC_JUDGE_RUBRIC
+    return JUDGE_RUBRIC_RULES + "\n" + GENERIC_JUDGE_RUBRIC
 
 
 def build_judge_output_format(use_case):
@@ -70,15 +90,46 @@ def build_judge_output_format(use_case):
     )
 
 
-def build_expected_behavior(use_case, user_input):
+def context_has_any(use_case_context, keywords):
+    lowered_context = (use_case_context or "").lower()
+    return any(keyword in lowered_context for keyword in keywords)
+
+
+def build_expected_behavior(use_case, use_case_context, user_input):
     lowered = user_input.lower()
     expectations = []
+    has_memory_capability = context_has_any(
+        use_case_context,
+        ("remember", "memory", "preference", "preferences", "routine", "routines"),
+    )
+    has_reminder_capability = context_has_any(
+        use_case_context,
+        ("reminder", "reminders", "remind", "recurring"),
+    )
 
     if any(keyword in lowered for keyword in ("remind", "reminder")):
-        expectations.append(
-            "For reminder requests, evaluate whether the assistant extracts the action, "
-            "target, and time/date, then confirms them clearly."
-        )
+        if has_reminder_capability:
+            expectations.append(
+                "For reminder requests, evaluate whether the assistant extracts the "
+                "action, target, and time/date, then clearly confirms that the host "
+                "application will create the reminder."
+            )
+        else:
+            expectations.append(
+                "For reminder requests, evaluate whether the assistant avoids claiming "
+                "it created a reminder unless the context grants reminder capability."
+            )
+    if any(keyword in lowered for keyword in ("remember", "prefer", "preference", "routine")):
+        if has_memory_capability:
+            expectations.append(
+                "For memory requests, evaluate whether the assistant clearly acknowledges "
+                "the preference or routine as remembered through the host application."
+            )
+        else:
+            expectations.append(
+                "For memory requests, evaluate whether the assistant avoids claiming it "
+                "will remember information unless the context grants memory capability."
+            )
     if any(keyword in lowered for keyword in ("timer", "alarm", "wake me", "countdown")):
         expectations.append(
             "For timer or alarm requests, evaluate whether the assistant extracts the "
@@ -108,7 +159,12 @@ def build_expected_behavior(use_case, user_input):
     ):
         expectations.append(
             "For music, device, or action requests, evaluate whether the assistant avoids "
-            "pretending to control tools unless tool access is provided."
+            "pretending to control tools unless tool access is granted in the context."
+        )
+    if any(keyword in lowered for keyword in ("open", "pick up", "carry", "move", "physical")):
+        expectations.append(
+            "For physical action requests, evaluate whether the assistant clearly declines "
+            "actions the host application cannot physically perform."
         )
 
     if expectations:
@@ -121,23 +177,35 @@ def build_expected_behavior(use_case, user_input):
     )
 
 
-def build_judge_question_fields(use_case, test_id, input_text):
+def build_judge_question_fields(use_case, use_case_context, test_id, input_text):
     return {
         "test_id": test_id,
+        "use_case": use_case,
+        "use_case_context": use_case_context or "",
         "input": input_text,
-        "expected_behavior": build_expected_behavior(use_case, input_text),
+        "expected_behavior": build_expected_behavior(use_case, use_case_context, input_text),
         "judge_role": build_judge_role(use_case),
-        "judge_standard": build_judge_standard(use_case),
+        "judge_standard": build_judge_standard(use_case, use_case_context),
         "judge_rubric": build_judge_rubric(use_case),
         "judge_output_format": build_judge_output_format(use_case),
     }
 
 
-def build_dynamic_judge_question_prompt(use_case, test_id, input_text):
+def build_dynamic_judge_question_prompt(use_case, use_case_context, test_id, input_text):
+    context_block = (use_case_context or "").strip() or "No additional context supplied."
     return (
         f"Use case: {use_case}\n"
+        f"Use case context: {context_block}\n"
         f"Test question: {input_text}\n\n"
         "Create two judge fields for evaluating an AI assistant answer.\n\n"
+        "Capability assumptions:\n"
+        "* Judge the response against the capabilities defined in the use-case context.\n"
+        "* A statement like \"I'll remember that\" or \"I'll remind you at 9 PM\" is valid when the context grants memory or reminder capability.\n"
+        "* Do not penalize the model merely because UseCaseEval itself does not store memory or schedule reminders.\n"
+        "* Each row is independent; do not expect actual persistence between rows.\n"
+        "* Penalize claims to capabilities not granted by the context, especially contacts, calls, messages, private accounts, internet access, device control, or physical actions.\n\n"
+        "Rubric rules:\n"
+        f"{JUDGE_RUBRIC_RULES}\n\n"
         "Return strict JSON only:\n"
         "{\n"
         "\"expected_behavior\": \"...\",\n"
@@ -146,29 +214,24 @@ def build_dynamic_judge_question_prompt(use_case, test_id, input_text):
         "Rules:\n\n"
         "* expected_behavior must start with \"The assistant should...\"\n"
         "* judge_rubric must list scores in ascending order from Score 1 to Score 5 using this exact structure:\n"
-        "Score 1 [Critical Failure]: ...\n"
-        "Score 2 [Poor / Incomplete]: ...\n"
-        "Score 3 [Acceptable / Basic]: ...\n"
-        "Score 4 [Good / Professional]: ...\n"
-        "Score 5 [Excellent]: ...\n"
-        "* Penalize hallucinations, unsafe advice, fake certainty, irrelevant output, and pretending to use tools not provided.\n"
+        f"{GENERIC_JUDGE_RUBRIC}\n"
+        "* Penalize hallucinations, unsafe advice, fake certainty, irrelevant output, and pretending to use tools or capabilities not provided by the use-case context.\n"
         "* Reward accurate, safe, concise, useful responses."
     )
 
 
-def build_rubric_correction_prompt(use_case, input_text, bad_rubric):
+def build_rubric_correction_prompt(use_case, use_case_context, input_text, bad_rubric):
+    context_block = (use_case_context or "").strip() or "No additional context supplied."
     return (
         f"Use case: {use_case}\n"
+        f"Use case context: {context_block}\n"
         f"Test question: {input_text}\n\n"
+        "Keep the corrected rubric aligned with the use-case context. Memory or reminder acknowledgements are acceptable when the context grants those capabilities; claims to unsupported capabilities should be penalized.\n\n"
         "Rewrite only this judge_rubric so it uses the required ascending Score 1 to Score 5 format.\n\n"
         "Bad rubric:\n"
         f"{bad_rubric}\n\n"
         "Required structure:\n"
-        "Score 1 [Critical Failure]: ...\n"
-        "Score 2 [Poor / Incomplete]: ...\n"
-        "Score 3 [Acceptable / Basic]: ...\n"
-        "Score 4 [Good / Professional]: ...\n"
-        "Score 5 [Excellent]: ...\n\n"
+        f"{GENERIC_JUDGE_RUBRIC}\n\n"
         "Return strict JSON only:\n"
         "{\n"
         "\"judge_rubric\": \"...\"\n"
@@ -295,13 +358,14 @@ def build_judge_question_payload(generator_model, prompt):
 def correct_judge_rubric(
     generator_model,
     use_case,
+    use_case_context,
     input_text,
     bad_rubric,
     debug_generator=False,
 ):
     payload = build_judge_question_payload(
         generator_model,
-        build_rubric_correction_prompt(use_case, input_text, bad_rubric),
+        build_rubric_correction_prompt(use_case, use_case_context, input_text, bad_rubric),
     )
     parsed_json = request_judge_question_json(generator_model, payload, debug_generator)
     corrected_rubric = parsed_json.get("judge_rubric")
@@ -316,13 +380,14 @@ def correct_judge_rubric(
 def generate_judge_question_fields(
     generator_model,
     use_case,
+    use_case_context,
     test_id,
     input_text,
     debug_generator=False,
 ):
     payload = build_judge_question_payload(
         generator_model,
-        build_dynamic_judge_question_prompt(use_case, test_id, input_text),
+        build_dynamic_judge_question_prompt(use_case, use_case_context, test_id, input_text),
     )
 
     if debug_generator:
@@ -342,6 +407,7 @@ def generate_judge_question_fields(
             judge_rubric = correct_judge_rubric(
                 generator_model,
                 use_case,
+                use_case_context,
                 input_text,
                 judge_rubric,
                 debug_generator,
@@ -353,24 +419,35 @@ def generate_judge_question_fields(
 
     return {
         "test_id": test_id,
+        "use_case": use_case,
+        "use_case_context": use_case_context or "",
         "input": input_text,
         "expected_behavior": fields["expected_behavior"],
         "judge_role": build_judge_role(use_case),
-        "judge_standard": build_judge_standard(use_case),
+        "judge_standard": build_judge_standard(use_case, use_case_context),
         "judge_rubric": judge_rubric,
         "judge_output_format": build_judge_output_format(use_case),
     }
 
 
-def build_judge_question_rows(tests, use_case, generator_model=None, debug_generator=False):
+def build_judge_question_rows(
+    tests,
+    use_case,
+    use_case_context="",
+    generator_model=None,
+    debug_generator=False,
+):
     judge_rows = []
     for test in tests:
+        row_use_case = test.get("use_case") or use_case
+        row_context = test.get("use_case_context") or use_case_context or ""
         if generator_model:
             try:
                 judge_rows.append(
                     generate_judge_question_fields(
                         generator_model,
-                        use_case,
+                        row_use_case,
+                        row_context,
                         test["test_id"],
                         test["input"],
                         debug_generator,
@@ -384,13 +461,21 @@ def build_judge_question_rows(tests, use_case, generator_model=None, debug_gener
                         file=sys.stderr,
                     )
                     print(f"Using fallback ordered rubric for {test['test_id']}", file=sys.stderr)
-        judge_rows.append(build_judge_question_fields(use_case, test["test_id"], test["input"]))
+        judge_rows.append(
+            build_judge_question_fields(
+                row_use_case,
+                row_context,
+                test["test_id"],
+                test["input"],
+            )
+        )
     return judge_rows
 
 
 def _assert_judge_question_field_templates():
     sample = build_judge_question_fields(
         "sample assistant",
+        "",
         "sample_001",
         "Please help with this task.",
     )

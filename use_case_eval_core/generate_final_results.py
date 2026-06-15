@@ -54,16 +54,45 @@ def combine_judge_results(judge_1_pass_fail, judge_2_pass_fail):
     return judge_1_result or judge_2_result
 
 
+def resolve_compatible_context(model_return, judge_scores):
+    contexts = []
+    model_context = model_return.get("use_case_context", "") or ""
+    if model_context:
+        contexts.append(("model returns", model_context))
+
+    for judge_slot, judge_score in sorted((judge_scores or {}).items()):
+        judge_context = judge_score.get("use_case_context", "") or ""
+        if judge_context:
+            contexts.append((judge_slot, judge_context))
+
+    if not contexts:
+        return ""
+
+    first_source, first_context = contexts[0]
+    for source, context in contexts[1:]:
+        if context != first_context:
+            join_key = make_join_key(model_return)
+            raise ValueError(
+                "Conflicting use_case_context values for "
+                f"{format_join_key(join_key)}: {first_source}={first_context!r}, "
+                f"{source}={context!r}"
+            )
+
+    return first_context
+
+
 def build_final_result_row(model_return, judge_scores=None):
     judge_scores = judge_scores or {}
     judge_1_score = judge_scores.get("judge_1", {})
     judge_2_score = judge_scores.get("judge_2", {})
     judge_1_pass_fail = judge_1_score.get("judge_pass_fail", "")
     judge_2_pass_fail = judge_2_score.get("judge_pass_fail", "")
+    use_case_context = resolve_compatible_context(model_return, judge_scores)
 
     return {
         "test_id": model_return["test_id"],
         "use_case": model_return["use_case"],
+        "use_case_context": use_case_context,
         "input": model_return["input"],
         "model_name": model_return["model_name"],
         "model_response": model_return["model_response"],

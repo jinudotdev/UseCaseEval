@@ -65,10 +65,27 @@ def format_number(value):
     return f"{value:.2f}"
 
 
-def build_result_row(test, use_case, model_name, model_response, latency_ms, tokens_per_second):
+def resolve_test_use_case(test, use_case):
+    return test.get("use_case") or use_case
+
+
+def resolve_test_context(test, use_case_context=""):
+    return test.get("use_case_context") or use_case_context or ""
+
+
+def build_result_row(
+    test,
+    use_case,
+    use_case_context,
+    model_name,
+    model_response,
+    latency_ms,
+    tokens_per_second,
+):
     return {
         "test_id": test["test_id"],
-        "use_case": use_case,
+        "use_case": resolve_test_use_case(test, use_case),
+        "use_case_context": resolve_test_context(test, use_case_context),
         "input": test["input"],
         "model_name": model_name,
         "model_response": model_response,
@@ -81,15 +98,25 @@ def build_result_row(test, use_case, model_name, model_response, latency_ms, tok
         "judge_2_score": "",
         "judge_2_reason": "",
         "judge_2_pass_fail": "",
+        "combined_judge_result": "",
         "human_score": "",
         "human_notes": "",
     }
 
 
-def build_model_return_row(test, use_case, model_name, model_response, latency_ms, tokens_per_second):
+def build_model_return_row(
+    test,
+    use_case,
+    use_case_context,
+    model_name,
+    model_response,
+    latency_ms,
+    tokens_per_second,
+):
     return {
         "test_id": test["test_id"],
-        "use_case": use_case,
+        "use_case": resolve_test_use_case(test, use_case),
+        "use_case_context": resolve_test_context(test, use_case_context),
         "input": test["input"],
         "model_name": model_name,
         "model_response": model_response,
@@ -97,7 +124,7 @@ def build_model_return_row(test, use_case, model_name, model_response, latency_m
     }
 
 
-def run_model_returns(use_case, model_names, tests, max_tokens):
+def run_model_returns(use_case, model_names, tests, max_tokens, use_case_context=""):
     rows = []
 
     for model_name in model_names:
@@ -128,6 +155,7 @@ def run_model_returns(use_case, model_names, tests, max_tokens):
                 build_model_return_row(
                     test,
                     use_case,
+                    use_case_context,
                     model_name,
                     model_response,
                     latency_ms,
@@ -139,7 +167,7 @@ def run_model_returns(use_case, model_names, tests, max_tokens):
     return rows
 
 
-def run_eval(use_case, model_names, tests, max_tokens):
+def run_eval(use_case, model_names, tests, max_tokens, use_case_context=""):
     rows = []
 
     for model_name in model_names:
@@ -170,6 +198,7 @@ def run_eval(use_case, model_names, tests, max_tokens):
                 build_result_row(
                     test,
                     use_case,
+                    use_case_context,
                     model_name,
                     model_response,
                     latency_ms,
