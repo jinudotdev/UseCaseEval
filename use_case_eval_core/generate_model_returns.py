@@ -72,7 +72,6 @@ def build_result_row(test, use_case, model_name, model_response, latency_ms, tok
         "input": test["input"],
         "model_name": model_name,
         "model_response": model_response,
-        "latency_ms": format_number(latency_ms),
         "tokens_per_second": format_number(tokens_per_second),
         "judge_1_model": "",
         "judge_1_score": "",
@@ -94,7 +93,6 @@ def build_model_return_row(test, use_case, model_name, model_response, latency_m
         "input": test["input"],
         "model_name": model_name,
         "model_response": model_response,
-        "latency_ms": format_number(latency_ms),
         "tokens_per_second": format_number(tokens_per_second),
     }
 

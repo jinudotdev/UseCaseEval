@@ -20,7 +20,6 @@ MODEL_RESULT_COLUMNS = [
     "input",
     "model_name",
     "model_response",
-    "latency_ms",
     "tokens_per_second",
     "judge_1_model",
     "judge_1_score",
@@ -43,7 +42,6 @@ MODEL_RETURNS_COLUMNS = [
     "input",
     "model_name",
     "model_response",
-    "latency_ms",
     "tokens_per_second",
 ]
 

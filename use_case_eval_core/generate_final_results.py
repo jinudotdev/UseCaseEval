@@ -67,7 +67,6 @@ def build_final_result_row(model_return, judge_scores=None):
         "input": model_return["input"],
         "model_name": model_return["model_name"],
         "model_response": model_return["model_response"],
-        "latency_ms": model_return["latency_ms"],
         "tokens_per_second": model_return["tokens_per_second"],
         "judge_1_model": judge_1_score.get("judge_model", ""),
         "judge_1_score": judge_1_score.get("judge_score", ""),
