@@ -4,20 +4,25 @@
 
 ## TL;DR
 
-UseCaseEval uses the strongest local model you can run on your machine to help evaluate smaller local models for specific real-world use cases.
+UseCaseEval answers the question: **“Which local model will work best for this job?”**
 
-The idea is simple:
+When hardware is limited, especially on mobile devices, we need to choose a model that fits the available resources while still performing the task reliably. The goal is to find the smallest model that is good enough for the job.
 
-1. Use a capable local model to generate realistic test questions.
-2. Use that same stronger model to generate judge rubrics for those questions.
-3. Run smaller candidate models against the questions.
-4. Compare which small model is good enough for the job.
+### Quick start
 
-This is useful because phones, laptops, and consumer devices are getting powerful enough to run local models. But the question is not just “Can this model run locally?” The better question is:
+You need:
 
-> Can this model run locally and behave well enough for this specific app or use case?
+* Python 3.11 or newer
+* Ollama installed and running
+* At least one Ollama model downloaded
 
-UseCaseEval helps answer that.
+Clone this repository, open PowerShell in the project folder, install the requirements, and launch the GUI:
+
+```powershell
+pip install -r requirements.txt
+python -m use_case_eval_gui.app
+```
+
 
 ---
 
